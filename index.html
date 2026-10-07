@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VFERDZ Converter</title>
+  <link rel="icon" href="/assets/images/logo.ico" sizes="any">
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "Segoe UI", sans-serif;
+      --background: #fff7f7;
+      --surface: #fff;
+      --card: #fff;
+      --primary-red: #e50914;
+      --neon-red: #ff1744;
+      --dark-red: #7f0000;
+      --text-primary: #231416;
+      --text-secondary: #735d60;
+      --border: #e3c6ca;
+      --hover: #ff3045;
+      --input-border: #b99095;
+      --thumbnail-bg: #f7e9eb;
+      --page: var(--background);
+      --text: var(--text-primary);
+      --muted: var(--text-secondary);
+      --subtle: #826b6e;
+      --error: var(--dark-red);
+      --focus-ring: #e5091440;
+      color: var(--text-primary);
+      background: var(--background);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --background: #050505;
+      --surface: #0f0f10;
+      --card: #18181b;
+      --primary-red: #e50914;
+      --neon-red: #ff1744;
+      --dark-red: #7f0000;
+      --text-primary: #f5f5f5;
+      --text-secondary: #a1a1aa;
+      --border: #2a1115;
+      --hover: #ff3045;
+      --input-border: #54262d;
+      --thumbnail-bg: #18181b;
+      --page: var(--background);
+      --text: var(--text-primary);
+      --muted: var(--text-secondary);
+      --subtle: #85858e;
+      --error: var(--neon-red);
+      --focus-ring: #ff174466;
+    }
+    * { box-sizing: border-box; }
+    body {
+      height: 100vh;
+      margin: 0;
+      padding: 24px;
+      overflow: hidden;
+      background: radial-gradient(ellipse at 50% 0%, #ffe5e8 0, var(--page) 60%);
+    }
+    :root[data-theme="dark"] body {
+      background: radial-gradient(ellipse at 50% 0%, #26090e 0, var(--page) 60%);
+    }
+    main {
+      width: min(100%, 1440px);
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex: 0 0 auto;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .theme-toggle {
+      width: 48px;
+      min-height: 48px;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+    }
+    .theme-toggle svg {
+      width: 21px;
+      height: 21px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.8;
+    }
+    .theme-toggle .sun-icon { display: none; }
+    :root[data-theme="dark"] .theme-toggle .moon-icon { display: none; }
+    :root[data-theme="dark"] .theme-toggle .sun-icon { display: block; }
+    .theme-toggle:hover { background: var(--page); }
+    .theme-toggle:disabled { opacity: 1; cursor: pointer; }
+    .theme-toggle:focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+    .mode-tabs {
+      display: flex;
+      gap: 8px;
+      margin: 0 0 28px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--page);
+    }
+    .mode-tab {
+      min-height: 48px;
+      margin: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .mode-tab:hover { background: var(--surface); }
+    .mode-tab[aria-selected="true"] {
+      background: var(--primary-red);
+      color: #fff;
+      box-shadow: 0 1px 4px #7f000033;
+    }
+    :root[data-theme="dark"] .mode-tab[aria-selected="true"] {
+      background: var(--primary-red);
+      color: #fff;
+      box-shadow: 0 1px 4px #e5091433;
+    }
+    .brand-logo {
+      width: 58px;
+      height: 58px;
+      flex: 0 0 auto;
+      object-fit: contain;
+    }
+    h1 { margin: 0 0 7px; font-size: 34px; letter-spacing: -0.9px; }
+    .intro { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.55; }
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 28px;
+      align-items: stretch;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      padding: 40px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--card);
+      box-shadow: 0 18px 55px #00000014;
+    }
+    .downloads-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-heading { margin: 0 0 10px; font-size: 25px; letter-spacing: -0.4px; }
+    .panel-intro { margin: 0 0 28px; color: var(--muted); font-size: 16px; line-height: 1.6; }
+    .downloads-mode { margin: 0 0 24px; color: var(--muted); font-size: 16px; }
+    .download-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .download-toolbar .downloads-mode { margin: 0; }
+    .view-switch {
+      display: inline-flex;
+      flex: 0 0 auto;
+      gap: 3px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .view-button {
+      width: 36px;
+      min-height: 36px;
+      margin: 0;
+      padding: 7px;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+    }
+    .view-button:hover { background: var(--card); }
+    .view-button[aria-pressed="true"] {
+      background: var(--primary-red);
+      color: #fff;
+    }
+    .view-button svg {
+      width: 19px;
+      height: 19px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.8;
+    }
+    .view-toolbar[hidden] { display: none; }
+    .download-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    label { display: block; margin-bottom: 10px; font-size: 16px; font-weight: 600; }
+    input {
+      width: 100%;
+      min-height: 58px;
+      padding: 16px 18px;
+      border: 1px solid var(--input-border);
+      border-radius: 10px;
+      outline: none;
+      background: var(--surface);
+      color: inherit;
+      font: inherit;
+      font-size: 16px;
+    }
+    input::placeholder { color: var(--subtle); }
+    input:focus { border-color: var(--primary-red); box-shadow: 0 0 0 3px var(--focus-ring); }
+    button, .download {
+      width: 100%;
+      min-height: 56px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 18px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--primary-red);
+      color: #fff;
+      font: inherit;
+      font-weight: 650;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button:hover, .download:hover { background: var(--hover); }
+    button:disabled { opacity: .6; cursor: wait; }
+    .status { margin-top: 28px; color: var(--muted); font-size: 16px; line-height: 1.6; }
+    .status.error { color: var(--error); }
+    progress { width: 100%; height: 10px; margin-top: 16px; accent-color: var(--primary-red); }
+    progress[hidden], .result-list[hidden], .thumbnail[hidden], .download-all[hidden] { display: none; }
+    .download-all {
+      width: auto;
+      min-height: 40px;
+      gap: 7px;
+      margin: 0;
+      padding: 0 12px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .download-all svg {
+      width: 17px;
+      height: 17px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+    }
+    .download-all[hidden] { display: none; }
+    .result-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      margin-top: 0;
+      padding: 2px 5px 2px 0;
+    }
+    .batch-group {
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+    }
+    .batch-items {
+      display: grid;
+      align-content: start;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+      min-width: 0;
+    }
+    .view-grid .batch-items {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+    .batch-items[hidden] { display: none; }
+    .batch-heading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 2px;
+      padding: 8px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .batch-heading:first-child { margin-top: 0; }
+    .batch-toggle {
+      width: auto;
+      min-height: 24px;
+      flex: 0 1 auto;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      text-transform: inherit;
+      letter-spacing: inherit;
+    }
+    .batch-toggle:hover { background: transparent; color: var(--text-primary); }
+    .batch-toggle:focus-visible { outline: 2px solid var(--primary-red); outline-offset: 3px; }
+    .batch-chevron {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+      transform: rotate(90deg);
+      transition: transform .15s ease;
+    }
+    .batch-toggle[aria-expanded="false"] .batch-chevron { transform: rotate(0); }
+    .batch-download {
+      width: auto;
+      min-height: 32px;
+      flex: 0 0 auto;
+      gap: 6px;
+      margin: 0 0 0 auto;
+      padding: 0 9px;
+      border-radius: 7px;
+      font-size: 12px;
+      letter-spacing: normal;
+      text-transform: none;
+    }
+    .batch-download svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+    }
+    .empty-state {
+      display: grid;
+      flex: 1 1 auto;
+      min-height: 0;
+      place-items: center;
+      padding: 24px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+      text-align: center;
+    }
+    .empty-state[hidden] { display: none; }
+    .skipped-summary {
+      flex: 0 0 auto;
+      margin: 0 5px 8px 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .skipped-summary[hidden] { display: none; }
+    .skipped-summary summary {
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .skipped-summary ul {
+      max-height: 120px;
+      overflow-y: auto;
+      margin: 0;
+      padding: 0 12px 10px 30px;
+    }
+    .skipped-summary li { margin-top: 5px; overflow-wrap: anywhere; }
+    .result-item {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card);
+    }
+    .view-list .result-item {
+      gap: 14px;
+      padding: 10px 12px;
+    }
+    .track-number { display: none; }
+    .view-list .track-number {
+      display: grid;
+      width: 26px;
+      flex: 0 0 26px;
+      place-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .view-list .thumbnail {
+      width: 76px;
+      aspect-ratio: 16 / 9;
+    }
+    .view-list .result-title { margin-bottom: 3px; font-size: 14px; }
+    .view-list .file-size { font-size: 12px; }
+    .view-list .track-download {
+      width: 36px;
+      min-height: 36px;
+      margin-top: 0;
+      padding: 8px;
+    }
+    .view-grid .result-item {
+      align-items: stretch;
+      flex-direction: column;
+      position: relative;
+      gap: 8px;
+      padding: 9px;
+      overflow: hidden;
+    }
+    .thumbnail {
+      width: 144px;
+      aspect-ratio: 16 / 9;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      background: var(--thumbnail-bg);
+      object-fit: cover;
+    }
+    .view-grid .thumbnail {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+    }
+    .result-details { min-width: 0; flex: 1; }
+    .result-title { margin: 0 0 5px; overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+    .file-size { margin: 0; color: var(--muted); font-size: 13px; }
+    .track-download {
+      width: 42px;
+      min-height: 42px;
+      flex: 0 0 auto;
+      margin: 0 0 0 auto;
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .track-download svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.9;
+    }
+    .view-grid .track-download {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 36px;
+      min-height: 36px;
+      margin: 0;
+      padding: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(3px);
+      transition: opacity .15s ease, transform .15s ease;
+    }
+    .view-grid .result-item:hover .track-download,
+    .view-grid .result-item:focus-within .track-download {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .view-grid .result-title {
+      display: -webkit-box;
+      overflow: hidden;
+      font-size: 13px;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .view-grid .file-size { font-size: 11px; }
+    .view-grid .track-download.clicked {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    @media (hover: none) {
+      .view-grid .track-download {
+        opacity: 1;
+        pointer-events: auto;
+        transform: none;
+      }
+    }
+    @media (max-width: 1200px) {
+      .view-grid .batch-items { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1000px) {
+      .view-grid .batch-items { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 850px) {
+      .view-grid .batch-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .download.clicked,
+    .download.clicked:hover {
+      background: var(--dark-red);
+      color: #fff;
+    }
+    .footnote {
+      flex: 0 0 auto;
+      margin: 16px 0 0;
+      color: var(--subtle);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    @media (max-width: 760px) {
+      body {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+        padding: 18px;
+      }
+      main { height: auto; min-height: calc(100vh - 36px); }
+      .topbar { margin-bottom: 20px; }
+      .workspace-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+        flex: none;
+      }
+      .panel { min-height: 0; padding: 28px; }
+      .downloads-panel { min-height: 440px; }
+      .result-list { flex: 1 1 auto; min-height: 260px; max-height: 60vh; }
+      .view-grid .batch-items { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .empty-state { min-height: 180px; }
+    }
+    @media (max-width: 480px) {
+      body { padding: 12px; }
+      .topbar { margin-bottom: 20px; }
+      .brand { align-items: flex-start; }
+      .brand { gap: 10px; }
+      .brand-logo { width: 42px; height: 42px; }
+      .panel { padding: 20px; border-radius: 16px; }
+      .downloads-panel { min-height: 400px; }
+      h1 { font-size: 23px; }
+      .intro { font-size: 14px; }
+      .panel-heading { font-size: 21px; }
+      .panel-intro { font-size: 14px; }
+      .view-list .thumbnail { width: 64px; }
+      .view-grid .thumbnail { width: 100%; }
+      .view-grid .batch-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 400px) {
+      .view-grid .batch-items { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="/assets/images/logo.png" alt="">
+        <div>
+          <h1>VFERDZ Converter</h1>
+          <p class="intro">Convert a video or playlist to MP3 files saved on this computer.</p>
+        </div>
+      </div>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="true" title="Switch to light mode">
+        <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.5 8.5 0 1 0 20.2 15.1Z"></path></svg>
+        <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>
+      </button>
+    </div>
+    <div class="workspace-grid">
+      <section class="panel conversion-panel" aria-labelledby="conversion-heading">
+        <h2 id="conversion-heading" class="panel-heading">Convert</h2>
+        <p class="panel-intro">Choose what you want to convert, then paste its YouTube link.</p>
+        <div class="mode-tabs" role="tablist" aria-label="Conversion type">
+          <button id="single-tab" class="mode-tab" type="button" role="tab" aria-selected="true" aria-controls="form">Single Video</button>
+          <button id="playlist-tab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="form">Playlist</button>
+        </div>
+        <form id="form">
+          <label id="url-label" for="url">YouTube Video Link</label>
+          <input id="url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+          <button id="submit" type="submit">Convert video</button>
+        </form>
+        <div id="status" class="status" role="status" aria-live="polite">Ready when you are.</div>
+        <progress id="progress" max="100" value="0" hidden></progress>
+      </section>
+      <section class="panel downloads-panel" aria-labelledby="downloads-heading">
+        <h2 id="downloads-heading" class="panel-heading">Your downloads</h2>
+        <div class="download-toolbar">
+          <p id="downloads-mode" class="downloads-mode">Single MP3</p>
+          <div id="view-toolbar" class="view-toolbar" hidden>
+            <div class="download-actions">
+              <a id="download-zip" class="download download-all" aria-label="Download all ready playlist tracks as ZIP" title="Download all ready playlist tracks as ZIP" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>
+                <span>All</span>
+              </a>
+              <div class="view-switch" role="group" aria-label="Playlist download layout">
+                <button class="view-button" type="button" data-view="list" aria-label="List view" aria-pressed="false" title="List view">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"></path><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>
+                </button>
+                <button class="view-button" type="button" data-view="grid" aria-label="Grid view" aria-pressed="false" title="Grid view">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="8" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect><rect x="13" y="13" width="8" height="8" rx="1"></rect></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <details id="skipped-summary" class="skipped-summary" hidden>
+          <summary id="skipped-heading"></summary>
+          <ul id="skipped-list"></ul>
+        </details>
+        <div id="empty-state" class="empty-state">Converted tracks will appear here.<br>Start a conversion to see your downloads.</div>
+        <section id="result-list" class="result-list" aria-label="Converted audio files" hidden></section>
+      </section>
+    </div>
+    <p class="footnote">Downloads and conversion run locally on this computer. Only convert content you have permission to download.</p>
+  </main>
+  <script>
+    const form = document.querySelector("#form");
+    const input = document.querySelector("#url");
+    const button = document.querySelector("#submit");
+    const urlLabel = document.querySelector("#url-label");
+    const singleTab = document.querySelector("#single-tab");
+    const playlistTab = document.querySelector("#playlist-tab");
+    const status = document.querySelector("#status");
+    const progress = document.querySelector("#progress");
+    const zipDownload = document.querySelector("#download-zip");
+    const downloadsMode = document.querySelector("#downloads-mode");
+    const viewToolbar = document.querySelector("#view-toolbar");
+    const viewButtons = [...document.querySelectorAll(".view-button")];
+    const emptyState = document.querySelector("#empty-state");
+    const skippedSummary = document.querySelector("#skipped-summary");
+    const skippedHeading = document.querySelector("#skipped-heading");
+    const skippedList = document.querySelector("#skipped-list");
+    const resultList = document.querySelector("#result-list");
+    const themeToggle = document.querySelector("#theme-toggle");
+    let mode = "single";
+    let timer;
+    let renderedItems = 0;
+    let renderedBatch = 0;
+    let currentBatchItems = null;
+    let downloadView = localStorage.getItem("youtube-to-mp3-download-view");
+    if (!["list", "grid"].includes(downloadView)) {
+      downloadView = "grid";
+    }
+
+    function setDownloadView(view) {
+      downloadView = view;
+      resultList.classList.remove("view-list", "view-grid");
+      resultList.classList.add(`view-${view}`);
+      for (const viewButton of viewButtons) {
+        viewButton.setAttribute(
+          "aria-pressed",
+          String(viewButton.dataset.view === view),
+        );
+      }
+      localStorage.setItem("youtube-to-mp3-download-view", view);
+    }
+
+    setDownloadView(downloadView);
+    for (const viewButton of viewButtons) {
+      viewButton.addEventListener("click", () => {
+        setDownloadView(viewButton.dataset.view);
+      });
+    }
+
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      const isDark = theme === "dark";
+      const action = isDark ? "light" : "dark";
+      themeToggle.setAttribute("aria-label", `Switch to ${action} mode`);
+      themeToggle.title = `Switch to ${action} mode`;
+      themeToggle.setAttribute("aria-pressed", String(isDark));
+      localStorage.setItem("youtube-to-mp3-theme", theme);
+    }
+
+    const savedTheme = localStorage.getItem("youtube-to-mp3-theme");
+    setTheme(savedTheme === "light" ? "light" : "dark");
+
+    themeToggle.addEventListener("click", () => {
+      setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    });
+
+    function selectMode(selectedMode) {
+      mode = selectedMode;
+      const isPlaylist = mode === "playlist";
+      singleTab.setAttribute("aria-selected", String(!isPlaylist));
+      playlistTab.setAttribute("aria-selected", String(isPlaylist));
+      urlLabel.textContent = isPlaylist ? "YouTube Playlist Link" : "YouTube Video Link";
+      input.placeholder = isPlaylist
+        ? "https://www.youtube.com/playlist?list=..."
+        : "https://www.youtube.com/watch?v=...";
+      button.textContent = isPlaylist ? "Convert Playlist" : "Convert Video";
+      downloadsMode.textContent = isPlaylist ? "Playlist MP3s" : "Single MP3";
+      viewToolbar.hidden = !isPlaylist;
+      zipDownload.hidden = true;
+      status.textContent = isPlaylist
+        ? "Each playlist video will be saved as a separate MP3."
+        : "Ready when you are.";
+      emptyState.hidden = false;
+      resultList.hidden = true;
+      resultList.replaceChildren();
+      skippedSummary.hidden = true;
+      skippedList.replaceChildren();
+      renderedItems = 0;
+      renderedBatch = 0;
+      currentBatchItems = null;
+    }
+
+    function setModeTabsDisabled(disabled) {
+      singleTab.disabled = disabled;
+      playlistTab.disabled = disabled;
+    }
+
+    singleTab.addEventListener("click", () => selectMode("single"));
+    playlistTab.addEventListener("click", () => selectMode("playlist"));
+
+    zipDownload.addEventListener("click", () => {
+      zipDownload.classList.add("clicked");
+    });
+
+    function showResults(
+      items,
+      resultMode,
+      zipUrl,
+      zipFilename,
+      playlistTotal,
+      status,
+      skippedTracks,
+    ) {
+      skippedList.replaceChildren();
+      skippedSummary.hidden = skippedTracks.length === 0;
+      if (skippedTracks.length) {
+        skippedHeading.textContent = `Skipped tracks (${skippedTracks.length})`;
+        if (items.length === 0) {
+          emptyState.textContent =
+            "No tracks were converted successfully. See skipped tracks above for details.";
+        }
+        for (const skipped of skippedTracks) {
+          const entry = document.createElement("li");
+          entry.textContent = `${skipped.index}. ${skipped.title}: ${skipped.error}`;
+          skippedList.append(entry);
+        }
+      }
+      if (items.length < renderedItems) {
+        resultList.replaceChildren();
+        renderedItems = 0;
+        renderedBatch = 0;
+        currentBatchItems = null;
+      }
+      zipDownload.hidden = resultMode !== "playlist" || !zipUrl;
+      viewToolbar.hidden = resultMode !== "playlist";
+      const safeZipFilename =
+        zipFilename || "vferdzconverter-mp3youtubeplaylist.zip";
+      downloadsMode.textContent = resultMode === "playlist"
+        ? playlistTotal
+          ? `${items.length} of ${playlistTotal} playlist tracks ready`
+          : "Preparing playlist batches..."
+        : "Single MP3";
+      if (!zipDownload.hidden) {
+        zipDownload.href = zipUrl;
+        zipDownload.download = safeZipFilename;
+        const zipDescription = status === "done"
+          ? "Download the entire playlist as a ZIP"
+          : "Download all ready playlist tracks as a ZIP";
+        zipDownload.setAttribute("aria-label", zipDescription);
+        zipDownload.title = zipDescription;
+      } else {
+        zipDownload.removeAttribute("href");
+      }
+      for (const [offset, item] of items.slice(renderedItems).entries()) {
+        if (item.batch && item.batch !== renderedBatch) {
+          const batchGroup = document.createElement("section");
+          batchGroup.className = "batch-group";
+          const batchHeading = document.createElement("h3");
+          batchHeading.className = "batch-heading";
+          const batchToggle = document.createElement("button");
+          batchToggle.className = "batch-toggle";
+          batchToggle.type = "button";
+          batchToggle.setAttribute("aria-expanded", "true");
+          batchToggle.setAttribute("aria-controls", `batch-items-${item.batch}`);
+          batchToggle.setAttribute("aria-label", `Collapse batch ${item.batch}`);
+          const batchLabel = document.createElement("span");
+          batchLabel.textContent = `Batch ${item.batch}`;
+          const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          chevron.classList.add("batch-chevron");
+          chevron.setAttribute("viewBox", "0 0 24 24");
+          chevron.setAttribute("aria-hidden", "true");
+          const chevronPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          chevronPath.setAttribute("d", "m9 18 6-6-6-6");
+          chevron.append(chevronPath);
+          batchToggle.append(chevron, batchLabel);
+          const batchItems = document.createElement("div");
+          batchItems.className = "batch-items";
+          batchItems.id = `batch-items-${item.batch}`;
+          const batchDownload = document.createElement("a");
+          batchDownload.className = "download batch-download";
+          batchDownload.href = `${zipUrl}?batch=${item.batch}`;
+          const zipBaseName = safeZipFilename.replace(/\.zip$/i, "");
+          batchDownload.download =
+            `${zipBaseName}-batch-${item.batch}.zip`;
+          batchDownload.setAttribute(
+            "aria-label",
+            `Download all MP3s in batch ${item.batch} as a ZIP`,
+          );
+          batchDownload.title = `Download all MP3s in batch ${item.batch} as a ZIP`;
+          batchDownload.innerHTML =
+            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg><span>Download batch</span>';
+          batchDownload.addEventListener("click", () => {
+            batchDownload.classList.add("clicked");
+          });
+          batchToggle.addEventListener("click", () => {
+            const expanded = batchToggle.getAttribute("aria-expanded") === "true";
+            batchToggle.setAttribute("aria-expanded", String(!expanded));
+            batchToggle.setAttribute(
+              "aria-label",
+              `${expanded ? "Expand" : "Collapse"} batch ${item.batch}`,
+            );
+            batchItems.hidden = expanded;
+          });
+          batchHeading.append(batchToggle, batchDownload);
+          batchGroup.append(batchHeading, batchItems);
+          resultList.append(batchGroup);
+          currentBatchItems = batchItems;
+          renderedBatch = item.batch;
+        }
+        const card = document.createElement("article");
+        card.className = "result-item";
+
+        const trackNumber = document.createElement("span");
+        trackNumber.className = "track-number";
+        trackNumber.textContent = String(renderedItems + offset + 1);
+        trackNumber.setAttribute("aria-hidden", "true");
+        card.append(trackNumber);
+
+        if (item.thumbnail) {
+          const image = document.createElement("img");
+          image.className = "thumbnail";
+          image.src = item.thumbnail;
+          image.alt = `Thumbnail for ${item.title}`;
+          image.addEventListener("error", () => image.remove());
+          card.append(image);
+        }
+
+        const details = document.createElement("div");
+        details.className = "result-details";
+        const title = document.createElement("h2");
+        title.className = "result-title";
+        title.textContent = item.title;
+        const size = document.createElement("p");
+        size.className = "file-size";
+        size.textContent = `MP3 file size: ${formatFileSize(item.file_size)}`;
+        const link = document.createElement("a");
+        link.className = "download track-download";
+        link.href = item.download_url;
+        link.download = `${item.title}.mp3`;
+        link.addEventListener("click", () => {
+          link.classList.add("clicked");
+        });
+        details.append(title, size);
+        link.setAttribute("aria-label", `Download ${item.title} as MP3`);
+        link.title = `Download ${item.title} as MP3`;
+        link.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>';
+        card.append(details, link);
+        (currentBatchItems || resultList).append(card);
+      }
+      renderedItems = items.length;
+      resultList.hidden = items.length === 0;
+      emptyState.hidden = items.length > 0;
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ["KB", "MB", "GB", "TB"];
+      let size = bytes;
+      let unit = -1;
+      do {
+        size /= 1024;
+        unit += 1;
+      } while (size >= 1024 && unit < units.length - 1);
+      return `${size.toFixed(1)} ${units[unit]}`;
+    }
+
+    function showError(message) {
+      status.textContent = message;
+      status.classList.add("error");
+      button.disabled = false;
+      setModeTabsDisabled(false);
+      progress.hidden = true;
+      resultList.hidden = renderedItems === 0;
+      emptyState.hidden = renderedItems > 0;
+    }
+
+    async function pollStatus() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
+        const result = await response.json();
+        status.classList.remove("error");
+        status.textContent = result.message;
+        progress.value = result.progress;
+        progress.hidden = !["preparing", "downloading", "converting"].includes(result.status);
+        showResults(
+          result.items,
+          result.mode,
+          result.zip_url,
+          result.zip_filename,
+          result.playlist_total,
+          result.status,
+          result.skipped_tracks || [],
+        );
+        if (result.status === "done") {
+          button.disabled = false;
+          setModeTabsDisabled(false);
+          clearInterval(timer);
+        } else if (result.status === "error") {
+          showError(result.error || result.message);
+          clearInterval(timer);
+        }
+      } catch {
+        showError("Could not connect to the local app. Restart it and try again.");
+        clearInterval(timer);
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearInterval(timer);
+      zipDownload.hidden = true;
+      zipDownload.removeAttribute("href");
+      zipDownload.classList.remove("clicked");
+      resultList.hidden = true;
+      resultList.replaceChildren();
+      skippedSummary.hidden = true;
+      skippedList.replaceChildren();
+      renderedItems = 0;
+      renderedBatch = 0;
+      currentBatchItems = null;
+      emptyState.hidden = false;
+      emptyState.textContent = mode === "playlist"
+        ? "Playlist tracks will appear here as each one is converted."
+        : "Your MP3 download will appear here when conversion is complete.";
+      status.classList.remove("error");
+      status.textContent = "Starting download...";
+      progress.value = 0;
+      progress.hidden = false;
+      button.disabled = true;
+      setModeTabsDisabled(true);
+      try {
+        const response = await fetch("/api/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: input.value.trim(), mode })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          showError(result.error || "Could not start the download.");
+          return;
+        }
+        await pollStatus();
+        timer = setInterval(pollStatus, 700);
+      } catch {
+        showError("Could not connect to the local app. Restart it and try again.");
+      }
+    });
+  </script>
+</body>
+</html>
