@@ -462,6 +462,46 @@
       aspect-ratio: 16 / 9;
     }
     .result-details { min-width: 0; flex: 1; }
+    .playlist-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .playlist-summary[hidden] { display: none; }
+    .playlist-summary-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .playlist-summary-thumb {
+      width: 68px;
+      aspect-ratio: 16 / 9;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      object-fit: cover;
+      background: var(--thumbnail-bg);
+    }
+    .playlist-summary-details { min-width: 0; }
+    .playlist-summary-title {
+      margin: 0 0 4px;
+      overflow-wrap: anywhere;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+    .playlist-summary-creator {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
     .result-title { margin: 0 0 5px; overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
     .file-size { margin: 0; color: var(--muted); font-size: 13px; }
     .track-download {
@@ -619,10 +659,6 @@
           <p id="downloads-mode" class="downloads-mode">Single MP3</p>
           <div id="view-toolbar" class="view-toolbar" hidden>
             <div class="download-actions">
-              <a id="download-zip" class="download download-all" aria-label="Download all ready playlist tracks as ZIP" title="Download all ready playlist tracks as ZIP" hidden>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>
-                <span>All</span>
-              </a>
               <div class="view-switch" role="group" aria-label="Playlist download layout">
                 <button class="view-button" type="button" data-view="list" aria-label="List view" aria-pressed="false" title="List view">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"></path><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>
@@ -633,6 +669,19 @@
               </div>
             </div>
           </div>
+        </div>
+        <div id="playlist-summary" class="playlist-summary" hidden>
+          <div class="playlist-summary-content">
+            <img id="playlist-summary-thumb" class="playlist-summary-thumb" alt="" hidden>
+            <div class="playlist-summary-details">
+              <h3 id="playlist-summary-title" class="playlist-summary-title"></h3>
+              <p id="playlist-summary-creator" class="playlist-summary-creator"></p>
+            </div>
+          </div>
+          <a id="download-zip" class="download download-all" aria-label="Download all ready playlist tracks as ZIP" title="Download all ready playlist tracks as ZIP" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>
+            <span>All</span>
+          </a>
         </div>
         <details id="skipped-summary" class="skipped-summary" hidden>
           <summary id="skipped-heading"></summary>
@@ -661,6 +710,10 @@
     const skippedSummary = document.querySelector("#skipped-summary");
     const skippedHeading = document.querySelector("#skipped-heading");
     const skippedList = document.querySelector("#skipped-list");
+    const playlistSummary = document.querySelector("#playlist-summary");
+    const playlistSummaryThumb = document.querySelector("#playlist-summary-thumb");
+    const playlistSummaryTitle = document.querySelector("#playlist-summary-title");
+    const playlistSummaryCreator = document.querySelector("#playlist-summary-creator");
     const resultList = document.querySelector("#result-list");
     const themeToggle = document.querySelector("#theme-toggle");
     let mode = "single";
@@ -727,6 +780,7 @@
         ? "Each playlist video will be saved as a separate MP3."
         : "Ready when you are.";
       emptyState.hidden = false;
+      playlistSummary.hidden = true;
       resultList.hidden = true;
       resultList.replaceChildren();
       skippedSummary.hidden = true;
@@ -756,9 +810,27 @@
       playlistTotal,
       status,
       skippedTracks,
+      playlistTitle,
+      playlistThumbnail,
+      playlistCreator,
     ) {
       skippedList.replaceChildren();
       skippedSummary.hidden = skippedTracks.length === 0;
+      const hasPlaylistSummary = resultMode === "playlist" && playlistTitle;
+      playlistSummary.hidden = !hasPlaylistSummary;
+      if (hasPlaylistSummary) {
+        playlistSummaryTitle.textContent = playlistTitle;
+        const creatorText = playlistCreator ? `by ${playlistCreator}` : "Playlist creator unavailable";
+        playlistSummaryCreator.textContent = creatorText;
+        if (playlistThumbnail) {
+          playlistSummaryThumb.src = playlistThumbnail;
+          playlistSummaryThumb.alt = `Thumbnail for ${playlistTitle}`;
+          playlistSummaryThumb.hidden = false;
+        } else {
+          playlistSummaryThumb.removeAttribute("src");
+          playlistSummaryThumb.hidden = true;
+        }
+      }
       if (skippedTracks.length) {
         skippedHeading.textContent = `Skipped tracks (${skippedTracks.length})`;
         if (items.length === 0) {
@@ -936,6 +1008,9 @@
           result.playlist_total,
           result.status,
           result.skipped_tracks || [],
+          result.playlist_title,
+          result.playlist_thumbnail,
+          result.playlist_creator,
         );
         if (result.status === "done") {
           button.disabled = false;

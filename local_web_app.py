@@ -29,6 +29,8 @@ class DownloadManager:
             "items": [],
             "skipped_tracks": [],
             "playlist_title": "",
+            "playlist_thumbnail": "",
+            "playlist_creator": "",
             "playlist_total": 0,
             "current_batch": 0,
             "batch_count": 0,
@@ -59,6 +61,8 @@ class DownloadManager:
                 "items": [],
                 "skipped_tracks": [],
                 "playlist_title": "",
+                "playlist_thumbnail": "",
+                "playlist_creator": "",
                 "playlist_total": 0,
                 "current_batch": 0,
                 "batch_count": 0,
@@ -186,6 +190,21 @@ class DownloadManager:
 
             total = len(entries)
             batch_count = (total + PLAYLIST_BATCH_SIZE - 1) // PLAYLIST_BATCH_SIZE
+            playlist_thumbnail = self._safe_thumbnail(
+                (playlist.get("thumbnail") or "")
+                or (
+                    (playlist.get("thumbnails") or [{}])[-1].get("url")
+                    if playlist.get("thumbnails")
+                    else ""
+                )
+            )
+            playlist_creator = (
+                playlist.get("uploader")
+                or playlist.get("channel")
+                or playlist.get("creator")
+                or playlist.get("uploader_id")
+                or "Unknown creator"
+            )
             with self.lock:
                 self.state.update(
                     status="downloading",
@@ -195,6 +214,8 @@ class DownloadManager:
                         or playlist.get("playlist_title")
                         or "mp3youtubeplaylist"
                     ),
+                    playlist_thumbnail=playlist_thumbnail,
+                    playlist_creator=playlist_creator,
                     playlist_total=total,
                     batch_count=batch_count,
                     current_batch=1,
@@ -473,6 +494,9 @@ class LocalAppHandler(BaseHTTPRequestHandler):
                         for index, item in enumerate(state["items"])
                     ],
                     "skipped_tracks": state["skipped_tracks"],
+                    "playlist_title": state.get("playlist_title", ""),
+                    "playlist_thumbnail": state.get("playlist_thumbnail", ""),
+                    "playlist_creator": state.get("playlist_creator", ""),
                     "playlist_total": state["playlist_total"],
                     "current_batch": state["current_batch"],
                     "batch_count": state["batch_count"],
