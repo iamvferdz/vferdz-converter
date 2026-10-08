@@ -16,16 +16,30 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Generate commit message notes
+      - name: Load matching changelog entry
         shell: bash
         run: |
-          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
-          if [ -n "$previous_tag" ]; then
-            printf '## Changes since %s\n\n' "$previous_tag" > release-notes.md
-            git log --format='- %s (`%h`)' "$previous_tag..$GITHUB_REF_NAME" >> release-notes.md
-          else
-            printf '## Changes\n\n' > release-notes.md
-            git log --format='- %s (`%h`)' "$GITHUB_REF_NAME" >> release-notes.md
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(tr -d '\r\n' < VERSION)"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match VERSION ($file_version)."
+            exit 1
+          fi
+          if ! awk -v header="## [$tag_version]" '
+            index($0, header) == 1 && substr($0, length(header) + 1, 1) == " " {
+              found = 1
+              next
+            }
+            found && /^## / { exit }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > release-notes.md; then
+            echo "::error::No changelog entry found for version $tag_version."
+            exit 1
+          fi
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::The changelog entry for version $tag_version is empty."
+            exit 1
           fi
       - name: Create project ZIP
         run: |
@@ -38,6 +52,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
+          generate_release_notes: false
           body_path: release-notes.md
           files: vferdz-converter-${{ github.ref_name }}.zip
