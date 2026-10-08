@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Updates | VFERDZ Converter</title>
+  <link rel="icon" href="/Assets/Images/logo.ico" sizes="any">
+  <link rel="stylesheet" href="/Assets/CSS/app.css">
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="/Assets/Images/logo.png" alt="">
+        <div>
+          <h1>VFERDZ Converter</h1>
+          <p class="intro">Convert music or a playlist to MP3 files saved on this computer.</p>
+        </div>
+      </div>
+      <div class="header-actions" role="group" aria-label="Page and theme controls">
+        <a class="header-icon-button" href="/" aria-label="Home" title="Home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7"></path><path d="M5 9v12h14V9M9 21v-7h6v7"></path></svg>
+        </a>
+        <a class="header-icon-button" href="/updates" aria-current="page" aria-label="Updates" title="Updates">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2.5 1.5"></path><circle cx="12" cy="12" r="9"></circle><path d="M8 2h8"></path></svg>
+        </a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="true" title="Switch to light mode">
+          <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.5 8.5 0 1 0 20.2 15.1Z"></path></svg>
+          <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>
+        </button>
+      </div>
+    </div>
+<section id="updates-page" class="app-page updates-page" aria-labelledby="updates-heading">
+      <h2 id="updates-heading" class="page-heading">Updates</h2>
+      <p id="updates-description" class="page-description">Release notes for VFERDZ Converter.</p>
+      <div class="updates-actions">
+        <a class="release-link updates-release-link" href="https://github.com/iamvferdz/vferdz-converter/releases" target="_blank" rel="noopener noreferrer">Browse all GitHub releases</a>
+        <div class="download-actions">
+          <span id="update-check-status" class="release-status" role="status" aria-live="polite">Checking GitHub for updates...</span>
+          <button id="refresh-releases" class="refresh-releases" type="button">Check for updates</button>
+        </div>
+      </div>
+      <div id="release-list" class="release-list" aria-live="polite">
+        <p class="release-status">Loading GitHub releases...</p>
+      </div>
+    </section>
+<footer class="site-footer">
+      <div class="footer-brand-row">
+        <a class="footer-brand" href="https://github.com/iamvferdz/vferdz-converter" target="_blank" rel="noopener noreferrer">
+          <img class="footer-logo" src="/Assets/Images/logo.png" alt="">
+          <span>VFERDZ Converter</span>
+        </a>
+        <div class="footer-meta">
+          <span class="footer-version">Version <span id="app-version">loading...</span></span>
+        </div>
+      </div>
+      <nav class="footer-links" aria-label="Tools and converters">
+        <a class="footer-link" href="/converter">YouTube to MP3</a>
+      </nav>
+    </footer>
+  </main>
+  <script src="/Assets/JS/app.js" defer></script>
+</body>
+</html>

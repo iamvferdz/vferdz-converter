@@ -1,0 +1,29 @@
+name: Release ZIP
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+      - name: Create project ZIP
+        run: |
+          git archive \
+            --format=zip \
+            --prefix="vferdz-converter-${GITHUB_REF_NAME}/" \
+            HEAD \
+            -o "vferdz-converter-${GITHUB_REF_NAME}.zip"
+      - name: Publish ZIP on GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: vferdz-converter-${{ github.ref_name }}.zip

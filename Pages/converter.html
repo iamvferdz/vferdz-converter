@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube to MP3 | VFERDZ Converter</title>
+  <link rel="icon" href="/Assets/Images/logo.ico" sizes="any">
+  <link rel="stylesheet" href="/Assets/CSS/app.css">
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="/Assets/Images/logo.png" alt="">
+        <div>
+          <h1>VFERDZ Converter</h1>
+          <p class="intro">Convert music or a playlist to MP3 files saved on this computer.</p>
+        </div>
+      </div>
+      <div class="header-actions" role="group" aria-label="Page and theme controls">
+        <a class="header-icon-button" href="/" aria-label="Home" title="Home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7"></path><path d="M5 9v12h14V9M9 21v-7h6v7"></path></svg>
+        </a>
+        <a class="header-icon-button" href="/updates" aria-label="Updates" title="Updates">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2.5 1.5"></path><circle cx="12" cy="12" r="9"></circle><path d="M8 2h8"></path></svg>
+        </a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="true" title="Switch to light mode">
+          <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.5 8.5 0 1 0 20.2 15.1Z"></path></svg>
+          <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>
+        </button>
+      </div>
+    </div>
+<section id="converter-page" class="app-page converter-page" aria-labelledby="conversion-heading">
+    <div id="youtube-converter" class="converter-content">
+    <div class="workspace-grid">
+      <section class="panel conversion-panel" aria-labelledby="conversion-heading">
+        <h2 id="conversion-heading" class="panel-heading">Convert to MP3</h2>
+        <p class="panel-intro">Choose what you want to convert, then paste its YouTube link.</p>
+        <div class="mode-tabs" role="tablist" aria-label="Conversion type">
+          <button id="single-tab" class="mode-tab" type="button" role="tab" aria-selected="true" aria-controls="form">Single</button>
+          <button id="playlist-tab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="form">Playlist</button>
+        </div>
+        <form id="form">
+          <label id="url-label" for="url">YouTube Music Link</label>
+          <input id="url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" required>
+          <div class="convert-actions">
+            <button id="submit" class="convert-submit" type="submit">Convert to MP3</button>
+            <button id="stop-conversion" class="stop-conversion" type="button" aria-label="Stop conversion" title="Stop conversion" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
+            </button>
+          </div>
+        </form>
+        <p id="conversion-notice" class="conversion-notice" hidden>Please wait while conversion finishes. Keep this page open; playlist tracks are processed one at a time.</p>
+        <div id="status" class="status" role="status" aria-live="polite">Ready when you are.</div>
+        <progress id="progress" max="100" value="0" hidden></progress>
+      </section>
+      <section class="panel downloads-panel" aria-labelledby="downloads-heading">
+        <h2 id="downloads-heading" class="panel-heading">Your downloads</h2>
+        <div class="download-toolbar">
+          <p id="downloads-mode" class="downloads-mode">Single MP3</p>
+          <div id="view-toolbar" class="view-toolbar" hidden>
+            <div class="download-actions">
+              <div class="view-switch" role="group" aria-label="Playlist download layout">
+                <button class="view-button" type="button" data-view="list" aria-label="List view" aria-pressed="false" title="List view">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"></path><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>
+                </button>
+                <button class="view-button" type="button" data-view="grid" aria-label="Grid view" aria-pressed="false" title="Grid view">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="8" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect><rect x="13" y="13" width="8" height="8" rx="1"></rect></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="playlist-summary" class="playlist-summary" hidden>
+          <div class="playlist-summary-content">
+            <img id="playlist-summary-thumb" class="playlist-summary-thumb" alt="" hidden>
+            <div class="playlist-summary-details">
+              <h3 id="playlist-summary-title" class="playlist-summary-title"></h3>
+              <p id="playlist-summary-creator" class="playlist-summary-creator"></p>
+            </div>
+          </div>
+          <a id="download-zip" class="download download-all" aria-label="Download all ready playlist tracks as ZIP" title="Download all ready playlist tracks as ZIP" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>
+            <span>All</span>
+          </a>
+        </div>
+        <details id="skipped-summary" class="skipped-summary" hidden>
+          <summary id="skipped-heading"></summary>
+          <ul id="skipped-list"></ul>
+        </details>
+        <div id="empty-state" class="empty-state">Converted tracks will appear here.<br>Start a conversion to see your downloads.</div>
+        <section id="result-list" class="result-list" aria-label="Converted audio files" hidden></section>
+      </section>
+    </div>
+    <p class="footnote">Downloads and conversion run locally on this computer. Only convert content you have permission to download.</p>
+    </div>
+    </section>
+<footer class="site-footer">
+      <div class="footer-brand-row">
+        <a class="footer-brand" href="https://github.com/iamvferdz/vferdz-converter" target="_blank" rel="noopener noreferrer">
+          <img class="footer-logo" src="/Assets/Images/logo.png" alt="">
+          <span>VFERDZ Converter</span>
+        </a>
+        <div class="footer-meta">
+          <span class="footer-version">Version <span id="app-version">loading...</span></span>
+        </div>
+      </div>
+      <nav class="footer-links" aria-label="Tools and converters">
+        <a class="footer-link" href="/converter">YouTube to MP3</a>
+      </nav>
+    </footer>
+  </main>
+  <script src="/Assets/JS/app.js" defer></script>
+</body>
+</html>

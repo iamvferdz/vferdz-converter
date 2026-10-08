@@ -2,6 +2,7 @@ import json
 import re
 import secrets
 import shutil
+import subprocess
 import tempfile
 import threading
 import webbrowser
@@ -11,11 +12,103 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from yt_dlp import YoutubeDL
+from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
+from yt_dlp.utils import DownloadError
 
 
 DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP3"
 ALLOWED_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 PLAYLIST_BATCH_SIZE = 10
+
+
+def validate_youtube_mode_url(url, mode):
+    parsed_url = urlsplit(url)
+    hostname = (parsed_url.hostname or "").lower()
+    if (
+        parsed_url.scheme not in {"http", "https"}
+        or hostname not in ALLOWED_HOSTS
+        or parsed_url.username
+        or parsed_url.password
+    ):
+        raise ValueError("Enter a valid YouTube video URL.")
+
+    has_playlist_id = bool(parse_qs(parsed_url.query).get("list", [""])[0].strip())
+    is_playlist_url = hostname != "youtu.be" and (
+        parsed_url.path.rstrip("/") == "/playlist" or has_playlist_id
+    )
+    if mode == "playlist" and not (is_playlist_url and has_playlist_id):
+        raise ValueError("Playlist mode only accepts a YouTube playlist link.")
+    if mode == "single" and is_playlist_url:
+        raise ValueError(
+            "Single mode accepts a music/video link, not a playlist link. "
+            "Choose Playlist mode instead."
+        )
+
+
+class CancellableFFmpegExtractAudioPP(FFmpegExtractAudioPP):
+    def __init__(self, downloader, cancel_event):
+        super().__init__(
+            downloader, preferredcodec="mp3", preferredquality="192"
+        )
+        self.cancel_event = cancel_event
+
+    def run_ffmpeg(self, path, out_path, codec, more_opts):
+        options = ["-vn"]
+        if codec is not None:
+            options.extend(["-acodec", codec])
+        options.extend(more_opts)
+        self.check_version()
+        oldest_mtime = Path(path).stat().st_mtime
+        command = [self.executable, "-y"]
+        if self.basename == "ffmpeg":
+            command.extend(["-loglevel", "repeat+info"])
+
+        for kind, files in (("i", [(path, [])]), ("o", [(out_path, options)])):
+            for index, (filename, file_options) in enumerate(files, start=1):
+                file_options = list(file_options)
+                config_keys = [f"_{kind}{index}", f"_{kind}"]
+                if kind == "o":
+                    file_options.extend(["-movflags", "+faststart"])
+                    if index == 1:
+                        config_keys.append("")
+                file_options.extend(
+                    self._configuration_args(self.basename, config_keys)
+                )
+                if kind == "i":
+                    file_options.append("-i")
+                command.extend(file_options)
+                command.append(self._ffmpeg_filename_argument(filename))
+
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        while True:
+            try:
+                _, stderr = process.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                if not self.cancel_event.is_set():
+                    continue
+                process.terminate()
+                try:
+                    process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                raise DownloadError(
+                    "Conversion was stopped."
+                )
+
+        if self.cancel_event.is_set():
+            raise DownloadError("Conversion was stopped.")
+        if process.returncode:
+            message = stderr.strip().splitlines()
+            raise RuntimeError(message[-1] if message else "FFmpeg conversion failed.")
+        self.try_utime(out_path, oldest_mtime, oldest_mtime)
 
 
 class DownloadManager:
@@ -36,7 +129,9 @@ class DownloadManager:
             "batch_count": 0,
             "error": "",
             "token": "",
+            "request_id": "",
         }
+        self.cancel_event = threading.Event()
 
     def snapshot(self):
         with self.lock:
@@ -44,11 +139,16 @@ class DownloadManager:
             state["items"] = [dict(item) for item in self.state["items"]]
             return state
 
-    def start(self, url, mode):
+    def start(self, url, mode, request_id=None):
         with self.lock:
-            if self.state["status"] in {"preparing", "downloading", "converting"}:
+            if self.state["status"] in {
+                "preparing", "downloading", "converting", "stopping"
+            }:
                 return False
             token = secrets.token_urlsafe(24)
+            request_id = request_id or secrets.token_urlsafe(24)
+            cancel_event = threading.Event()
+            self.cancel_event = cancel_event
             self.state = {
                 "status": "preparing" if mode == "playlist" else "downloading",
                 "progress": 0,
@@ -68,18 +168,43 @@ class DownloadManager:
                 "batch_count": 0,
                 "error": "",
                 "token": token,
+                "request_id": request_id,
             }
         threading.Thread(
-            target=self._download, args=(url, mode), daemon=True
+            target=self._download, args=(url, mode, cancel_event), daemon=True
         ).start()
         return True
 
-    def _download(self, url, mode):
+    def stop(self, request_id):
+        with self.lock:
+            if (
+                not request_id
+                or not self.state["request_id"]
+                or not secrets.compare_digest(request_id, self.state["request_id"])
+                or self.state["status"] not in {
+                    "preparing", "downloading", "converting"
+                }
+            ):
+                return False
+            self.cancel_event.set()
+            self.state.update(
+                status="stopping",
+                message="Stopping conversion...",
+            )
+            return True
+
+    @staticmethod
+    def _check_cancelled(cancel_event):
+        if cancel_event.is_set():
+            raise DownloadError("Conversion was stopped.")
+
+    def _download(self, url, mode, cancel_event):
         if mode == "playlist":
-            self._download_playlist(url)
+            self._download_playlist(url, cancel_event)
             return
 
         def on_progress(data):
+            self._check_cancelled(cancel_event)
             if data.get("status") != "downloading":
                 return
             downloaded = data.get("downloaded_bytes", 0)
@@ -93,6 +218,7 @@ class DownloadManager:
                 else track_progress
             )
             with self.lock:
+                self._check_cancelled(cancel_event)
                 self.state["progress"] = progress
                 if mode == "playlist" and count:
                     self.state["message"] = (
@@ -109,11 +235,13 @@ class DownloadManager:
                     )
 
         def on_postprocessor(data):
+            self._check_cancelled(cancel_event)
             if data.get("status") == "started":
                 entry = data.get("info_dict") or {}
                 index = entry.get("playlist_index")
                 count = entry.get("playlist_count")
                 with self.lock:
+                    self._check_cancelled(cancel_event)
                     self.state["status"] = "converting"
                     if mode == "playlist" and index and count:
                         self.state["message"] = (
@@ -129,20 +257,18 @@ class DownloadManager:
             "outtmpl": str(DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"),
             "noplaylist": True,
             "windowsfilenames": True,
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
+            "postprocessors": [],
             "progress_hooks": [on_progress],
             "postprocessor_hooks": [on_postprocessor],
         }
         try:
             DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
             with YoutubeDL(options) as ydl:
+                ydl.add_post_processor(
+                    CancellableFFmpegExtractAudioPP(ydl, cancel_event)
+                )
                 info = ydl.extract_info(url, download=True)
+                self._check_cancelled(cancel_event)
                 mp3_path = Path(ydl.prepare_filename(info)).with_suffix(".mp3")
             if not mp3_path.is_file():
                 raise FileNotFoundError(
@@ -157,6 +283,7 @@ class DownloadManager:
                 "batch": 0,
             }
             with self.lock:
+                self._check_cancelled(cancel_event)
                 self.state.update(
                     status="done",
                     progress=100,
@@ -165,14 +292,21 @@ class DownloadManager:
                 )
         except Exception as error:
             with self.lock:
-                self.state.update(
-                    status="error",
-                    message="The download could not be completed.",
-                    error=str(error),
-                )
+                if cancel_event.is_set():
+                    self.state.update(
+                        status="stopped",
+                        message="Conversion was stopped.",
+                    )
+                else:
+                    self.state.update(
+                        status="error",
+                        message="The download could not be completed.",
+                        error=str(error),
+                    )
 
-    def _download_playlist(self, url):
+    def _download_playlist(self, url, cancel_event):
         try:
+            self._check_cancelled(cancel_event)
             DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
             with YoutubeDL(
                 {
@@ -182,6 +316,7 @@ class DownloadManager:
                 }
             ) as ydl:
                 playlist = ydl.extract_info(url, download=False)
+                self._check_cancelled(cancel_event)
                 entries = [
                     entry for entry in playlist.get("entries", []) if entry
                 ] if playlist else []
@@ -206,6 +341,7 @@ class DownloadManager:
                 or "Unknown creator"
             )
             with self.lock:
+                self._check_cancelled(cancel_event)
                 self.state.update(
                     status="downloading",
                     message=f"Playlist found: {total} tracks. Starting batch 1 of {batch_count}.",
@@ -222,9 +358,11 @@ class DownloadManager:
                 )
 
             for batch_start in range(0, total, PLAYLIST_BATCH_SIZE):
+                self._check_cancelled(cancel_event)
                 batch_number = batch_start // PLAYLIST_BATCH_SIZE + 1
                 batch_entries = entries[batch_start : batch_start + PLAYLIST_BATCH_SIZE]
                 with self.lock:
+                    self._check_cancelled(cancel_event)
                     self.state.update(
                         status="downloading",
                         current_batch=batch_number,
@@ -232,6 +370,7 @@ class DownloadManager:
                     )
 
                 for batch_offset, entry in enumerate(batch_entries):
+                    self._check_cancelled(cancel_event)
                     playlist_index = batch_start + batch_offset + 1
                     title = (
                         entry.get("title") or f"Track {playlist_index}"
@@ -239,6 +378,7 @@ class DownloadManager:
                         else f"Track {playlist_index}"
                     )
                     with self.lock:
+                        self._check_cancelled(cancel_event)
                         self.state.update(
                             status="downloading",
                             message=(
@@ -251,6 +391,7 @@ class DownloadManager:
                         video_url = self._playlist_video_url(entry)
 
                         def on_progress(data):
+                            self._check_cancelled(cancel_event)
                             if data.get("status") != "downloading":
                                 return
                             downloaded = data.get("downloaded_bytes", 0)
@@ -280,8 +421,10 @@ class DownloadManager:
                                 )
 
                         def on_postprocessor(data):
+                            self._check_cancelled(cancel_event)
                             if data.get("status") == "started":
                                 with self.lock:
+                                    self._check_cancelled(cancel_event)
                                     self.state.update(
                                         status="converting",
                                         message=(
@@ -298,18 +441,16 @@ class DownloadManager:
                             ),
                             "noplaylist": True,
                             "windowsfilenames": True,
-                            "postprocessors": [
-                                {
-                                    "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": "192",
-                                }
-                            ],
+                            "postprocessors": [],
                             "progress_hooks": [on_progress],
                             "postprocessor_hooks": [on_postprocessor],
                         }
                         with YoutubeDL(options) as ydl:
+                            ydl.add_post_processor(
+                                CancellableFFmpegExtractAudioPP(ydl, cancel_event)
+                            )
                             info = ydl.extract_info(video_url, download=True)
+                            self._check_cancelled(cancel_event)
                             if not info:
                                 raise ValueError(
                                     f"Could not download playlist track "
@@ -339,6 +480,8 @@ class DownloadManager:
                                 playlist_index * 100 / total
                             )
                     except Exception as error:
+                        if cancel_event.is_set():
+                            raise
                         with self.lock:
                             self.state["skipped_tracks"].append(
                                 {
@@ -357,6 +500,12 @@ class DownloadManager:
                             )
 
             with self.lock:
+                if cancel_event.is_set():
+                    self.state.update(
+                        status="stopped",
+                        message="Conversion was stopped.",
+                    )
+                    return
                 ready_count = len(self.state["items"])
                 skipped_count = len(self.state["skipped_tracks"])
                 completion_message = (
@@ -374,17 +523,23 @@ class DownloadManager:
                 )
         except Exception as error:
             with self.lock:
-                self.state.update(
-                    status="error",
-                    message=(
-                        f"Playlist could not be processed. "
-                        f"{len(self.state['items'])} tracks are ready and "
-                        f"{len(self.state['skipped_tracks'])} tracks were skipped."
-                        if self.state["mode"] == "playlist"
-                        else "The download could not be completed."
-                    ),
-                    error=str(error),
-                )
+                if cancel_event.is_set():
+                    self.state.update(
+                        status="stopped",
+                        message="Conversion was stopped.",
+                    )
+                else:
+                    self.state.update(
+                        status="error",
+                        message=(
+                            f"Playlist could not be processed. "
+                            f"{len(self.state['items'])} tracks are ready and "
+                            f"{len(self.state['skipped_tracks'])} tracks were skipped."
+                            if self.state["mode"] == "playlist"
+                            else "The download could not be completed."
+                        ),
+                        error=str(error),
+                    )
 
     @staticmethod
     def _playlist_video_url(entry):
@@ -464,16 +619,35 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self.send_error(403)
             return
 
-        if self.path == "/":
-            page = Path(__file__).with_name("index.html").read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(page)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(page)
-        elif self.path in {"/assets/images/logo.ico", "/assets/images/logo.png"}:
+        static_files = {
+            "/": ("Pages/index.html", "text/html; charset=utf-8"),
+            "/index.html": ("Pages/index.html", "text/html; charset=utf-8"),
+            "/updates": ("Pages/updates.html", "text/html; charset=utf-8"),
+            "/updates.html": ("Pages/updates.html", "text/html; charset=utf-8"),
+            "/converter": ("Pages/converter.html", "text/html; charset=utf-8"),
+            "/converter.html": ("Pages/converter.html", "text/html; charset=utf-8"),
+            "/Assets/CSS/app.css": ("Assets/CSS/app.css", "text/css; charset=utf-8"),
+            "/Assets/JS/app.js": ("Assets/JS/app.js", "text/javascript; charset=utf-8"),
+        }
+        if self.path in static_files:
+            self._send_static_file(*static_files[self.path])
+        elif self.path in {"/Assets/Images/logo.ico", "/Assets/Images/logo.png"}:
             self._send_brand_asset(self.path)
+        elif self.path == "/api/version":
+            try:
+                version = Path(__file__).with_name("VERSION").read_text(
+                    encoding="utf-8"
+                ).strip()
+            except OSError as error:
+                self._send_json(
+                    500,
+                    {"error": f"Could not read the version file: {error}"},
+                )
+                return
+            if not version:
+                self._send_json(500, {"error": "The version file is empty."})
+                return
+            self._send_json(200, {"version": version})
         elif self.path == "/api/status":
             state = manager.snapshot()
             self._send_json(
@@ -532,6 +706,20 @@ class LocalAppHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
+    def _send_static_file(self, filename, content_type):
+        file_path = Path(__file__).parent.joinpath(*filename.split("/"))
+        try:
+            contents = file_path.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(contents)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(contents)
+
     def _send_brand_asset(self, request_path):
         asset_name = "logo.ico" if request_path.endswith(".ico") else "logo.png"
         asset_path = Path(__file__).parent / "Assets" / "Images" / asset_name
@@ -555,6 +743,29 @@ class LocalAppHandler(BaseHTTPRequestHandler):
         ):
             self.send_error(403)
             return
+        if self.path == "/api/stop":
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length <= 0 or content_length > 8192:
+                    raise ValueError("Request body has an invalid size.")
+                body = json.loads(self.rfile.read(content_length))
+                request_id = body.get("request_id")
+                if (
+                    not isinstance(request_id, str)
+                    or not request_id
+                    or len(request_id) > 128
+                ):
+                    raise ValueError("Invalid conversion request ID.")
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                AttributeError,
+                ValueError,
+            ) as error:
+                self._send_json(400, {"error": str(error)})
+                return
+            self._send_json(200, {"stopped": manager.stop(request_id)})
+            return
         if self.path != "/api/download":
             self.send_error(404)
             return
@@ -566,16 +777,16 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(content_length))
             url = body.get("url", "").strip()
             mode = body.get("mode", "single")
+            request_id = body.get("request_id")
             if mode not in {"single", "playlist"}:
                 raise ValueError("Choose single video or playlist mode.")
-            parsed_url = urlsplit(url)
             if (
-                parsed_url.scheme not in {"http", "https"}
-                or (parsed_url.hostname or "").lower() not in ALLOWED_HOSTS
-                or parsed_url.username
-                or parsed_url.password
+                not isinstance(request_id, str)
+                or not request_id
+                or len(request_id) > 128
             ):
-                raise ValueError("Enter a valid YouTube video URL.")
+                raise ValueError("Invalid conversion request ID.")
+            validate_youtube_mode_url(url, mode)
         except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as error:
             self._send_json(400, {"error": str(error)})
             return
@@ -586,7 +797,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
                 {"error": "FFmpeg is required. Install it and make sure it is on PATH."},
             )
             return
-        if not manager.start(url, mode):
+        if not manager.start(url, mode, request_id):
             self._send_json(
                 409,
                 {"error": "A conversion is already in progress. Please wait for it to finish."},
@@ -606,7 +817,9 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         if (
-            state["status"] not in {"downloading", "converting", "done", "error"}
+            state["status"] not in {
+                "downloading", "converting", "stopping", "stopped", "done", "error"
+            }
             or not download_token
             or not secrets.compare_digest(download_token, state["token"])
         ):
@@ -642,7 +855,9 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             )
             return
         if (
-            state["status"] not in {"downloading", "converting", "done", "error"}
+            state["status"] not in {
+                "downloading", "converting", "stopping", "stopped", "done", "error"
+            }
             or state["mode"] != "playlist"
             or not state["items"]
             or (batch is not None and batch < 1)
