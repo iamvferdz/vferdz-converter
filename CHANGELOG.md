@@ -2,7 +2,7 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
-## [Unreleased]
+## [0.2.0] - 10/13/2026
 
 ### Added
 - **Video to MP4 Converter**: Added a YouTube single-video converter with MP4 downloads saved separately from MP3 files.
