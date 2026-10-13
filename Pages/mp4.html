@@ -53,6 +53,13 @@
             <p id="conversion-notice" class="conversion-notice" hidden>Keep this page open while available resolutions are downloaded and combined into MP4.</p>
             <div id="status" class="status" role="status" aria-live="polite">Ready when you are.</div>
             <progress id="progress" max="100" value="0" hidden></progress>
+            <section class="backend-activity" aria-labelledby="backend-logs-heading">
+              <div class="backend-activity-heading">
+                <h3 id="backend-logs-heading">MP4 conversion activity</h3>
+                <button id="backend-logs-toggle" class="backend-logs-toggle" type="button" aria-expanded="false" aria-controls="backend-logs">Show more</button>
+              </div>
+              <ol id="backend-logs" class="backend-log-list" role="log" aria-live="polite" aria-relevant="additions"></ol>
+            </section>
           </section>
           <section class="panel downloads-panel" aria-labelledby="downloads-heading">
             <h2 id="downloads-heading" class="panel-heading">Your downloads</h2>

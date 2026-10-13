@@ -8,6 +8,8 @@ const form = document.querySelector("#form");
     const playlistTab = document.querySelector("#playlist-tab");
     const status = document.querySelector("#status");
     const progress = document.querySelector("#progress");
+    const backendLogList = document.querySelector("#backend-logs");
+    const backendLogToggle = document.querySelector("#backend-logs-toggle");
     const zipDownload = document.querySelector("#download-zip");
     const downloadsMode = document.querySelector("#downloads-mode");
     const viewToolbar = document.querySelector("#view-toolbar");
@@ -36,11 +38,15 @@ const form = document.querySelector("#form");
       "https://api.github.com/repos/iamvferdz/vferdz-converter/releases?per_page=100";
     let publishedReleasesCache = null;
     let publishedReleasesRequest = null;
+    let updateNotice = null;
     let mode = "single";
     let timer;
     let pollController;
     let operationId = 0;
     let activeRequestId = "";
+    let backendLogRefresh = null;
+    let renderedLogSignature = "";
+    let backendLogsExpanded = false;
     let renderedItems = 0;
     let renderedBatch = 0;
     let currentBatchItems = null;
@@ -102,7 +108,7 @@ const form = document.querySelector("#form");
         appVersion.textContent = result.version;
         if (updatesDescription) {
           updatesDescription.textContent =
-            `Installed version ${result.version}. Published release notes are loaded from GitHub.`;
+            `Installed version ${result.version}. Stable releases are checked when the app opens; review release notes or install an available update below.`;
         }
         return result.version;
       } catch (error) {
@@ -182,7 +188,151 @@ const form = document.querySelector("#form");
       }
     }
 
-    function addReleaseCard({ title, date, body, url, assetUrl }) {
+    function latestStableRelease(releases) {
+      return releases
+        .filter((release) => !release.prerelease
+          && typeof release.tag_name === "string"
+          && compareVersions(release.tag_name, currentAppVersion) !== null)
+        .reduce((latest, release) => (
+          !latest || compareVersions(release.tag_name, latest.tag_name) > 0
+            ? release
+            : latest
+        ), null);
+    }
+
+    function releaseZipAsset(release) {
+      const expectedName = `vferdz-converter-${release.tag_name}.zip`;
+      return (release.assets || []).find(
+        (asset) => asset.name === expectedName
+          && trustedGitHubUrl(asset.browser_download_url),
+      );
+    }
+
+    function releaseUpdateInfo(release, supported) {
+      const asset = releaseZipAsset(release);
+      return {
+        tag: release.tag_name,
+        digest: typeof asset?.digest === "string"
+          && /^sha256:[0-9a-f]{64}$/i.test(asset.digest)
+          ? asset.digest
+          : "",
+        assetUrl: asset ? asset.browser_download_url : "",
+        supported,
+      };
+    }
+
+    function showUpdateNotice(release, updateInfo) {
+      if (updateNotice) updateNotice.remove();
+      updateNotice = document.createElement("aside");
+      updateNotice.className = "update-notice";
+      updateNotice.setAttribute("aria-label", "App update available");
+      const text = document.createElement("div");
+      text.className = "update-notice-text";
+      const heading = document.createElement("strong");
+      heading.textContent = `VFERDZ Converter ${release.tag_name} is available.`;
+      const message = document.createElement("span");
+      message.className = "update-notice-status";
+      message.textContent = updateInfo.supported && updateInfo.digest
+        ? "Download and install the verified update, then the app will restart."
+        : "Download the latest release ZIP and replace the app manually.";
+      text.append(heading, message);
+      const actions = document.createElement("div");
+      actions.className = "update-notice-actions";
+      if (updateInfo.supported && updateInfo.digest) {
+        const installButton = document.createElement("button");
+        installButton.className = "install-update";
+        installButton.type = "button";
+        installButton.textContent = "Download and install";
+        installButton.addEventListener("click", () => {
+          installUpdate(release.tag_name, updateInfo.digest, installButton, message);
+        });
+        actions.append(installButton);
+      }
+      if (updateInfo.assetUrl) {
+        const downloadLink = document.createElement("a");
+        downloadLink.className = "release-link";
+        downloadLink.href = updateInfo.assetUrl;
+        downloadLink.textContent = "Download ZIP";
+        downloadLink.target = "_blank";
+        downloadLink.rel = "noopener noreferrer";
+        actions.append(downloadLink);
+      }
+      const dismissButton = document.createElement("button");
+      dismissButton.className = "update-notice-dismiss";
+      dismissButton.type = "button";
+      dismissButton.setAttribute("aria-label", "Dismiss update notice");
+      dismissButton.textContent = "×";
+      dismissButton.addEventListener("click", () => updateNotice.remove());
+      actions.append(dismissButton);
+      updateNotice.append(text, actions);
+      const main = document.querySelector("main");
+      const page = main?.querySelector(".app-page");
+      if (main && page) main.insertBefore(updateNotice, page);
+    }
+
+    async function installUpdate(tag, digest, button, status) {
+      button.disabled = true;
+      button.textContent = "Starting update...";
+      try {
+        const response = await fetch("/api/update/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag, digest }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || "The update could not be started.");
+        }
+        button.textContent = "Installing...";
+        while (true) {
+          const statusResponse = await fetch("/api/update/status", {
+            cache: "no-store",
+          });
+          const updateStatus = await statusResponse.json();
+          if (!statusResponse.ok) {
+            throw new Error(updateStatus.error || "Could not check update progress.");
+          }
+          status.textContent = updateStatus.message
+            ? `${updateStatus.message}${updateStatus.status === "downloading" && updateStatus.progress
+              ? ` (${updateStatus.progress}%)`
+              : ""}`
+            : "Preparing the update...";
+          if (updateStatus.status === "restarting") {
+            button.textContent = "Restarting...";
+            return;
+          }
+          if (updateStatus.status === "error") {
+            throw new Error(updateStatus.error || updateStatus.message);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 900));
+        }
+      } catch (error) {
+        status.textContent = error.message || "The update could not be installed.";
+        button.textContent = "Try again";
+        button.disabled = false;
+      }
+    }
+
+    async function checkForAvailableUpdate() {
+      if (!currentAppVersion) return;
+      try {
+        const [releases, statusResponse] = await Promise.all([
+          fetchPublishedReleases(),
+          fetch("/api/update/status", { cache: "no-store" }),
+        ]);
+        if (!statusResponse.ok) {
+          throw new Error(`Update capability request failed (${statusResponse.status}).`);
+        }
+        const updateStatus = await statusResponse.json();
+        const latest = latestStableRelease(releases);
+        if (!latest || compareVersions(latest.tag_name, currentAppVersion) <= 0) return;
+        showUpdateNotice(latest, releaseUpdateInfo(latest, updateStatus.supported));
+      } catch (error) {
+        console.warn("Could not check for app updates.", error);
+      }
+    }
+
+    function addReleaseCard({ title, date, body, url, assetUrl, updateInfo }) {
       const card = document.createElement("article");
       card.className = "release-card";
       const header = document.createElement("div");
@@ -238,8 +388,21 @@ const form = document.querySelector("#form");
         downloadLink.href = safeAssetUrl;
         downloadLink.target = "_blank";
         downloadLink.rel = "noopener noreferrer";
-        downloadLink.textContent = "Download ZIP";
+        downloadLink.textContent = "Download ZIP manually";
         actions.append(downloadLink);
+      }
+      if (updateInfo?.supported && updateInfo.digest) {
+        const installButton = document.createElement("button");
+        installButton.className = "install-update";
+        installButton.type = "button";
+        installButton.textContent = "Download and install";
+        installButton.addEventListener("click", () => {
+          const status = document.createElement("span");
+          status.className = "release-status";
+          actions.append(status);
+          installUpdate(updateInfo.tag, updateInfo.digest, installButton, status);
+        });
+        actions.append(installButton);
       }
       if (actions.childElementCount) card.append(actions);
     }
@@ -329,30 +492,26 @@ const form = document.querySelector("#form");
       loading.textContent = "Loading GitHub releases...";
       releaseList.append(loading);
       try {
-        const releases = await fetchPublishedReleases(forceRefresh);
+        const [releases, capabilityResponse] = await Promise.all([
+          fetchPublishedReleases(forceRefresh),
+          fetch("/api/update/status", { cache: "no-store" }),
+        ]);
+        if (!capabilityResponse.ok) {
+          throw new Error(`Update capability request failed (${capabilityResponse.status}).`);
+        }
+        const updateCapabilities = await capabilityResponse.json();
         releaseList.replaceChildren();
-        const latestStableRelease = releases
-          .filter((release) => !release.prerelease
-            && typeof release.tag_name === "string"
-            && compareVersions(
-            release.tag_name,
-            currentAppVersion,
-          ) !== null)
-          .reduce((latest, release) => (
-            !latest || compareVersions(release.tag_name, latest.tag_name) > 0
-              ? release
-              : latest
-          ), null);
+        const latest = latestStableRelease(releases);
         if (updateCheckStatus) {
           if (!currentAppVersion) {
             updateCheckStatus.textContent = "The installed version could not be read.";
-          } else if (!latestStableRelease) {
+          } else if (!latest) {
             updateCheckStatus.textContent = releases.length
               ? "No stable release with a comparable version is available."
               : "No published GitHub releases are available to check against.";
-          } else if (compareVersions(latestStableRelease.tag_name, currentAppVersion) > 0) {
+          } else if (compareVersions(latest.tag_name, currentAppVersion) > 0) {
             updateCheckStatus.textContent =
-              `A new update is available: ${latestStableRelease.tag_name}. Download its ZIP from the release list below.`;
+              `A new update is available: ${latest.tag_name}.`;
           } else {
             updateCheckStatus.textContent = `You are up to date (version ${currentAppVersion}).`;
           }
@@ -365,16 +524,18 @@ const form = document.querySelector("#form");
           return;
         }
         for (const release of releases) {
-          const asset = (release.assets || []).find(
-            (item) => typeof item.name === "string"
-              && item.name.toLowerCase().endsWith(".zip"),
-          );
+          const asset = releaseZipAsset(release);
+          const isNewer = latest?.tag_name === release.tag_name
+            && compareVersions(release.tag_name, currentAppVersion) > 0;
           addReleaseCard({
             title: release.name || release.tag_name,
             date: release.published_at || release.created_at,
             body: release.body || "",
             url: release.html_url,
             assetUrl: asset ? asset.browser_download_url : "",
+            updateInfo: isNewer
+              ? releaseUpdateInfo(release, updateCapabilities.supported)
+              : null,
           });
         }
       } catch (error) {
@@ -395,6 +556,7 @@ const form = document.querySelector("#form");
     }
 
     loadAppVersion().then(() => {
+      checkForAvailableUpdate();
       if (releaseList) loadUpdates();
     });
 
@@ -734,6 +896,70 @@ const form = document.querySelector("#form");
       emptyState.hidden = renderedItems > 0;
     }
 
+    function renderBackendLogs(logs) {
+      if (!backendLogList) return;
+      const signature = JSON.stringify(logs);
+      if (signature === renderedLogSignature) return;
+      renderedLogSignature = signature;
+      backendLogList.replaceChildren();
+      backendLogToggle.hidden = logs.length < 2;
+      if (!logs.length) {
+        const emptyEntry = document.createElement("li");
+        emptyEntry.className = "backend-log-empty";
+        emptyEntry.textContent = "Backend activity will appear here when you start a conversion.";
+        backendLogList.append(emptyEntry);
+        return;
+      }
+      for (const log of logs) {
+        const entry = document.createElement("li");
+        entry.className = `backend-log-entry backend-log-${log.status}`;
+        const time = document.createElement("time");
+        time.className = "backend-log-time";
+        time.textContent = log.time;
+        const message = document.createElement("span");
+        message.className = "backend-log-message";
+        message.textContent = log.message;
+        entry.append(time, message);
+        backendLogList.append(entry);
+      }
+      backendLogList.classList.toggle("is-expanded", backendLogsExpanded);
+    }
+
+    backendLogToggle?.addEventListener("click", () => {
+      backendLogsExpanded = !backendLogsExpanded;
+      backendLogList.classList.toggle("is-expanded", backendLogsExpanded);
+      backendLogToggle.setAttribute("aria-expanded", String(backendLogsExpanded));
+      backendLogToggle.textContent = backendLogsExpanded ? "Show less" : "Show more";
+    });
+
+    function refreshBackendLogs() {
+      if (!backendLogList || backendLogRefresh) return;
+      backendLogRefresh = fetch(`/api/logs?mode=${outputFormat}`, {
+        cache: "no-store",
+      })
+        .then(async (response) => {
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.error || `Log request failed (${response.status}).`);
+          }
+          if (!Array.isArray(result.logs)) {
+            throw new Error("The backend returned an invalid activity log.");
+          }
+          renderBackendLogs(result.logs);
+        })
+        .catch((error) => {
+          console.error("Could not load backend activity logs.", error);
+          renderBackendLogs([{
+            time: "",
+            status: "error",
+            message: "Could not load backend activity logs.",
+          }]);
+        })
+        .finally(() => {
+          backendLogRefresh = null;
+        });
+    }
+
     function friendlyErrorMessage(message) {
       const error = String(message || "").trim();
       const normalized = error.toLowerCase();
@@ -763,9 +989,9 @@ const form = document.querySelector("#form");
       }
       if (/ffmpeg/.test(normalized)) {
         if (outputFormat === "mp4") {
-          return "FFmpeg is required to combine video and audio into MP4. Check that it is installed and available, then try again.";
+          return "The app could not start its bundled video-processing component. Restart or reinstall the app, then try again.";
         }
-        return "Audio conversion could not be completed. Check that FFmpeg is installed and available, then try again.";
+        return "The app could not start its bundled audio-conversion component. Restart or reinstall the app, then try again.";
       }
       if (/timed out|timeout|connection reset|temporary failure|network is unreachable/.test(normalized)) {
         return "The connection to YouTube was interrupted. Check your internet connection and try again.";
@@ -786,6 +1012,7 @@ const form = document.querySelector("#form");
         });
         const result = await response.json();
         if (currentOperationId !== operationId) return;
+        refreshBackendLogs();
         status.classList.remove("error");
         status.textContent = result.message;
         progress.value = result.progress;
@@ -960,4 +1187,5 @@ const form = document.querySelector("#form");
         });
       }
     });
+    refreshBackendLogs();
     }

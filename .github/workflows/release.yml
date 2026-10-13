@@ -1,4 +1,4 @@
-name: Release ZIP
+name: Release Windows EXE ZIP
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4
@@ -41,14 +41,21 @@ jobs:
             echo "::error::The changelog entry for version $tag_version is empty."
             exit 1
           fi
-      - name: Create project ZIP
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packaging dependencies
         run: |
-          git archive \
-            --format=zip \
-            --prefix="vferdz-converter-${GITHUB_REF_NAME}/" \
-            HEAD \
-            -o "vferdz-converter-${GITHUB_REF_NAME}.zip"
-      - name: Publish ZIP on GitHub release
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Build standalone Windows app
+        run: python -m PyInstaller --noconfirm --clean "VFERDZ Converter.spec"
+      - name: Package executable in ZIP
+        run: Compress-Archive -Path "dist\VFERDZ Converter.exe" -DestinationPath "vferdz-converter-${{ github.ref_name }}.zip" -CompressionLevel Optimal
+      - name: Verify ZIP contains only the executable
+        run: python -c "import zipfile; names = zipfile.ZipFile('vferdz-converter-${{ github.ref_name }}.zip').namelist(); assert names == ['VFERDZ Converter.exe'], names"
+      - name: Publish app ZIP on GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
