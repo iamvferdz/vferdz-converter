@@ -2,6 +2,16 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [0.3.0] - 10/13/2026
+
+### Added
+- **Converter Activity Logs**: Added separate recent backend activity panels to the MP3 and MP4 converter pages.
+- **One-Click Updates**: The standalone app checks for stable releases and can verify, install, and restart into an update with user confirmation.
+
+### Improved
+- **Release Package**: The Windows release ZIP contains only the standalone executable, which bundles the required runtime dependencies.
+- **Safe Updates**: Update packages are SHA-256 verified and installed only after the user confirms.
+
 ## [0.2.0] - 10/13/2026
 
 ### Added

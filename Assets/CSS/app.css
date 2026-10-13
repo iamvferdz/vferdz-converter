@@ -90,6 +90,43 @@
       margin-bottom: 16px;
       flex: 0 0 auto;
     }
+    .update-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex: 0 0 auto;
+      margin: 0 4px 14px;
+      padding: 14px 18px;
+      border: 1px solid var(--primary-red);
+      border-radius: 12px;
+      background: var(--card);
+      box-shadow: 0 8px 24px #00000020;
+    }
+    .update-notice-text { display: grid; gap: 4px; min-width: 0; }
+    .update-notice-text strong { color: var(--text); font-size: 14px; }
+    .update-notice-status { color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .update-notice-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+    .install-update {
+      width: auto;
+      min-height: 38px;
+      margin: 0;
+      padding: 8px 13px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .update-notice-dismiss {
+      width: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 22px;
+    }
+    .update-notice-dismiss:hover { background: var(--surface); color: var(--text); }
+    .release-actions .install-update { margin: 0; }
     .brand {
       display: flex;
       align-items: center;
@@ -215,10 +252,66 @@
     }
     .converter-content {
       display: flex;
-      height: 100%;
+      min-height: 100%;
       flex-direction: column;
     }
-    .converter-content .workspace-grid { min-height: 580px; }
+    .converter-content .workspace-grid {
+      min-height: 580px;
+      flex: 0 0 auto;
+    }
+    .backend-activity {
+      min-width: 0;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .backend-activity-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .backend-activity-heading h3 { margin: 0; font-size: 15px; }
+    .backend-logs-toggle {
+      width: auto;
+      min-height: 30px;
+      flex: 0 0 auto;
+      margin: 0;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .backend-logs-toggle:hover { background: var(--page); color: var(--text); }
+    .backend-logs-toggle[hidden] { display: none; }
+    .backend-log-list {
+      display: grid;
+      gap: 6px;
+      max-height: 140px;
+      overflow-y: auto;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      scrollbar-gutter: stable;
+    }
+    .backend-log-list:not(.is-expanded) .backend-log-entry:not(:last-child) { display: none; }
+    .backend-log-entry {
+      display: flex;
+      min-width: 0;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: nowrap;
+    }
+    .backend-log-time { flex: 0 0 auto; color: var(--subtle); font-variant-numeric: tabular-nums; }
+    .backend-log-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .backend-log-done { color: var(--success, #27864a); }
+    .backend-log-error { color: var(--error); }
+    .backend-log-empty { color: var(--subtle); font-size: 13px; }
     .footer-links {
       display: flex;
       align-items: center;
@@ -938,13 +1031,15 @@
       }
       main { height: auto; min-height: calc(100vh - 36px); }
       .topbar { margin-bottom: 20px; }
+      .update-notice { align-items: flex-start; flex-direction: column; margin-inline: 0; }
+      .update-notice-actions { width: 100%; flex-wrap: wrap; }
       .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .workspace-grid {
         grid-template-columns: minmax(0, 1fr);
         gap: 16px;
         flex: none;
       }
-      .converter-content { height: auto; }
+      .converter-content { min-height: 0; }
       .converter-content .workspace-grid { min-height: 0; }
       .panel { min-height: 0; padding: 28px; }
       .downloads-panel { min-height: 440px; }

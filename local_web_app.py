@@ -1,11 +1,19 @@
 import copy
+import ctypes
+from datetime import datetime
+import hashlib
 import json
+import logging
+import os
 import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
+import time
+import urllib.request
 import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +21,10 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+import imageio_ffmpeg
+import pystray
+from PIL import Image
+from pystray import MenuItem
 from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
 from yt_dlp.utils import DownloadError
@@ -22,6 +34,68 @@ DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP3"
 VIDEO_DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP4"
 ALLOWED_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 PLAYLIST_BATCH_SIZE = 10
+UPDATE_REPOSITORY = "iamvferdz/vferdz-converter"
+MAX_UPDATE_ARCHIVE_SIZE = 250 * 1024 * 1024
+logger = logging.getLogger("vferdz_converter")
+
+
+def resource_path(relative_path):
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return root / relative_path
+
+
+def ffmpeg_executable():
+    if not getattr(sys, "frozen", False):
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def configure_logging():
+    log_folder = app_data_folder()
+    log_folder.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=log_folder / "app.log",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        encoding="utf-8",
+    )
+
+
+def app_data_folder():
+    return Path(
+        os.environ.get(
+            "LOCALAPPDATA",
+            str(Path.home() / "AppData" / "Local"),
+        )
+    ) / "VFERDZ Converter"
+
+
+def stable_version_key(value):
+    match = re.fullmatch(r"v?(\d+(?:\.\d+){1,3})", str(value).strip())
+    if not match:
+        raise ValueError("The update version is not a stable version number.")
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def is_newer_version(candidate, current):
+    candidate_key = stable_version_key(candidate)
+    current_key = stable_version_key(current)
+    segment_count = max(len(candidate_key), len(current_key))
+    return candidate_key + (0,) * (segment_count - len(candidate_key)) > (
+        current_key + (0,) * (segment_count - len(current_key))
+    )
+
+
+def show_startup_error(message):
+    if sys.platform == "win32":
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            f"{message}\n\nDetails are in %LOCALAPPDATA%\\VFERDZ Converter\\app.log.",
+            "VFERDZ Converter",
+            0x10,
+        )
 
 
 def mp4_format_selector(height):
@@ -34,7 +108,13 @@ def mp4_format_selector(height):
 def youtube_js_runtime_options():
     runtimes = {}
     for runtime in ("deno", "node", "bun"):
-        executable = shutil.which(runtime)
+        executable = (
+            str(resource_path("Scripts") / "deno.exe")
+            if runtime == "deno" and getattr(sys, "frozen", False)
+            else shutil.which(runtime)
+        )
+        if executable and not Path(executable).is_file():
+            executable = None
         if not executable and runtime == "deno":
             try:
                 deno_files = distribution("deno").files or ()
@@ -113,12 +193,16 @@ class CancellableFFmpegExtractAudioPP(FFmpegExtractAudioPP):
                 command.extend(file_options)
                 command.append(self._ffmpeg_filename_argument(filename))
 
+        popen_options = {}
+        if sys.platform == "win32":
+            popen_options["creationflags"] = subprocess.CREATE_NO_WINDOW
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            **popen_options,
         )
         while True:
             try:
@@ -148,6 +232,8 @@ class CancellableFFmpegExtractAudioPP(FFmpegExtractAudioPP):
 class DownloadManager:
     def __init__(self):
         self.lock = threading.Lock()
+        self.logs = {"mp3": [], "mp4": []}
+        self.last_log_signature = {"mp3": None, "mp4": None}
         self.state = {
             "status": "idle",
             "progress": 0,
@@ -167,14 +253,50 @@ class DownloadManager:
         }
         self.cancel_event = threading.Event()
 
+    @staticmethod
+    def _log_mode(mode):
+        return "mp4" if mode == "mp4" else "mp3"
+
+    def _record_state_log(self):
+        mode = self._log_mode(self.state["mode"])
+        status = self.state["status"]
+        message = self.state["message"]
+        if status == "idle" or not message:
+            return
+
+        log_message = re.sub(r"\s*\(\d+%\)|\s+\d+%$", "", message).strip()
+        signature = (status, log_message)
+        if signature == self.last_log_signature[mode]:
+            return
+
+        self.last_log_signature[mode] = signature
+        self.logs[mode].append(
+            {
+                "time": datetime.now().astimezone().strftime("%H:%M:%S"),
+                "status": status,
+                "message": log_message,
+            }
+        )
+        del self.logs[mode][:-60]
+
+    def get_logs(self, mode):
+        with self.lock:
+            return [dict(entry) for entry in self.logs[self._log_mode(mode)]]
+
     def snapshot(self):
         with self.lock:
+            self._record_state_log()
             state = dict(self.state)
             state["items"] = [dict(item) for item in self.state["items"]]
             return state
 
     def start(self, url, mode, request_id=None):
         with self.lock:
+            with update_manager.lock:
+                if update_manager.state["status"] in {
+                    "downloading", "verifying", "restarting"
+                }:
+                    return False
             if self.state["status"] in {
                 "preparing", "downloading", "converting", "stopping"
             }:
@@ -208,6 +330,7 @@ class DownloadManager:
                 "token": token,
                 "request_id": request_id,
             }
+            self._record_state_log()
         threading.Thread(
             target=self._download, args=(url, mode, cancel_event), daemon=True
         ).start()
@@ -229,6 +352,7 @@ class DownloadManager:
                 status="stopping",
                 message="Stopping conversion...",
             )
+            self._record_state_log()
             return True
 
     @staticmethod
@@ -295,6 +419,9 @@ class DownloadManager:
 
         options = {
             **youtube_js_runtime_options(),
+            "ffmpeg_location": ffmpeg_executable(),
+            "quiet": True,
+            "no_warnings": True,
             "format": "bestaudio/best",
             "outtmpl": str(
                 DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"
@@ -354,6 +481,9 @@ class DownloadManager:
             VIDEO_DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
             base_options = {
                 **youtube_js_runtime_options(),
+                "ffmpeg_location": ffmpeg_executable(),
+                "quiet": True,
+                "no_warnings": True,
                 "outtmpl": str(
                     VIDEO_DOWNLOAD_FOLDER
                     / "%(title)s [%(id)s] %(height)sp.%(ext)s"
@@ -464,7 +594,7 @@ class DownloadManager:
                                 "error": str(error),
                             }
                         )
-                        print(f"[local app] Could not prepare {quality}: {error}")
+                        logger.warning("Could not prepare %s: %s", quality, error)
                         continue
 
                     item = {
@@ -531,6 +661,8 @@ class DownloadManager:
             with YoutubeDL(
                 {
                     **youtube_js_runtime_options(),
+                    "quiet": True,
+                    "no_warnings": True,
                     "extract_flat": "in_playlist",
                     "skip_download": True,
                     "noplaylist": False,
@@ -657,6 +789,9 @@ class DownloadManager:
 
                         options = {
                             **youtube_js_runtime_options(),
+                            "ffmpeg_location": ffmpeg_executable(),
+                            "quiet": True,
+                            "no_warnings": True,
                             "format": "bestaudio/best",
                             "outtmpl": str(
                                 DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"
@@ -813,6 +948,287 @@ class DownloadManager:
 manager = DownloadManager()
 
 
+class UpdateManager:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.shutdown_callback = None
+        self.state = {
+            "status": "idle",
+            "progress": 0,
+            "tag": "",
+            "message": "",
+            "error": "",
+        }
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.state)
+
+    def start(self, tag, digest):
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
+            return False, "Automatic updates are available in the standalone Windows app."
+        if Path(sys.executable).name.lower() != "vferdz converter.exe":
+            return False, "The app executable could not be identified for updating."
+        try:
+            if not is_newer_version(tag, resource_path("VERSION").read_text(encoding="utf-8").strip()):
+                return False, "This update is not newer than the installed version."
+        except (OSError, ValueError) as error:
+            return False, f"Could not verify the update version: {error}"
+        if not isinstance(digest, str) or not re.fullmatch(
+            r"sha256:[0-9a-fA-F]{64}", digest
+        ):
+            return False, "GitHub did not provide a valid SHA-256 checksum for this release."
+        with manager.lock:
+            if manager.state["status"] in {
+                "preparing", "downloading", "converting", "stopping"
+            }:
+                return False, "Finish or stop the current conversion before updating."
+            with self.lock:
+                if self.state["status"] in {"downloading", "verifying", "restarting"}:
+                    return False, "An update is already in progress."
+                self.state = {
+                    "status": "downloading",
+                    "progress": 0,
+                    "tag": tag,
+                    "message": "Downloading the verified update...",
+                    "error": "",
+                }
+        threading.Thread(target=self._install, args=(tag, digest), daemon=True).start()
+        return True, ""
+
+    def _set_state(self, status, message, progress=None, error=""):
+        with self.lock:
+            self.state.update(
+                status=status,
+                message=message,
+                error=error,
+            )
+            if progress is not None:
+                self.state["progress"] = progress
+
+    def _install(self, tag, digest):
+        archive_path = None
+        staged_path = None
+        script_path = None
+        target_path = Path(sys.executable).resolve()
+        try:
+            powershell = shutil.which("powershell.exe")
+            if not powershell:
+                raise RuntimeError("Windows PowerShell is not available to complete the update.")
+            target_folder = target_path.parent
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix=".vferdz-write-check-", dir=target_folder, delete=True
+                ):
+                    pass
+            except OSError as error:
+                raise PermissionError(
+                    "The app folder is not writable. Move VFERDZ Converter.exe to a folder "
+                    "you own, such as a folder under %LOCALAPPDATA%, then retry."
+                ) from error
+
+            url = (
+                f"https://github.com/{UPDATE_REPOSITORY}/releases/download/"
+                f"{tag}/vferdz-converter-{tag}.zip"
+            )
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/octet-stream",
+                    "User-Agent": "VFERDZ-Converter-Updater",
+                },
+            )
+            with tempfile.NamedTemporaryFile(
+                prefix="vferdz-update-", suffix=".zip", delete=False
+            ) as archive_file:
+                archive_path = Path(archive_file.name)
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    final_url = urlsplit(response.geturl())
+                    if (
+                        final_url.scheme != "https"
+                        or final_url.hostname not in {
+                            "github.com",
+                            "release-assets.githubusercontent.com",
+                            "objects.githubusercontent.com",
+                        }
+                    ):
+                        raise RuntimeError("The update download redirected to an untrusted host.")
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > MAX_UPDATE_ARCHIVE_SIZE:
+                        raise RuntimeError("The update archive is larger than the allowed size.")
+                    digest_hash = hashlib.sha256()
+                    downloaded = 0
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        downloaded += len(chunk)
+                        if downloaded > MAX_UPDATE_ARCHIVE_SIZE:
+                            raise RuntimeError("The update archive is larger than the allowed size.")
+                        archive_file.write(chunk)
+                        digest_hash.update(chunk)
+                        self._set_state(
+                            "downloading",
+                            "Downloading the verified update...",
+                            min(99, int(downloaded * 100 / int(content_length)))
+                            if content_length and content_length.isdigit()
+                            else 0,
+                        )
+                archive_file.flush()
+                os.fsync(archive_file.fileno())
+
+            if digest_hash.hexdigest().lower() != digest.removeprefix("sha256:").lower():
+                raise RuntimeError("The update checksum did not match GitHub's SHA-256 digest.")
+
+            self._set_state("verifying", "Verifying the update package...", 100)
+            with zipfile.ZipFile(archive_path) as archive:
+                if archive.namelist() != ["VFERDZ Converter.exe"]:
+                    raise RuntimeError("The update ZIP must contain only VFERDZ Converter.exe.")
+                if archive.getinfo("VFERDZ Converter.exe").file_size > MAX_UPDATE_ARCHIVE_SIZE:
+                    raise RuntimeError("The app executable is larger than the allowed size.")
+                if archive.testzip() is not None:
+                    raise RuntimeError("The update ZIP is damaged.")
+                with archive.open("VFERDZ Converter.exe") as source:
+                    with tempfile.NamedTemporaryFile(
+                        prefix=".vferdz-update-",
+                        suffix=".exe",
+                        dir=target_folder,
+                        delete=False,
+                    ) as staged_file:
+                        staged_path = Path(staged_file.name)
+                        header = source.read(2)
+                        if header != b"MZ":
+                            raise RuntimeError("The downloaded app is not a valid Windows executable.")
+                        staged_file.write(header)
+                        shutil.copyfileobj(source, staged_file)
+                        staged_file.flush()
+                        os.fsync(staged_file.fileno())
+
+            self._set_state("verifying", "Preparing to replace the app...", 100)
+            script = r"""
+$ErrorActionPreference = 'Stop'
+$target = $env:VFERDZ_UPDATE_TARGET
+$staged = $env:VFERDZ_UPDATE_STAGED
+$backup = "$target.previous-$([guid]::NewGuid().ToString('N'))"
+$log = $env:VFERDZ_UPDATE_LOG
+$scriptPath = $MyInvocation.MyCommand.Path
+try {
+    Wait-Process -Id ([int]$env:VFERDZ_UPDATE_PARENT) -ErrorAction SilentlyContinue
+    $replaced = $false
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        try {
+            [System.IO.File]::Replace($staged, $target, $backup, $true)
+            $replaced = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if (-not $replaced) {
+        throw 'The app file remained in use or could not be replaced.'
+    }
+    try {
+        $app = Start-Process -FilePath $target -WorkingDirectory (Split-Path $target) -PassThru
+        Start-Sleep -Seconds 3
+        if (-not (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)) {
+            throw 'The updated app did not stay running.'
+        }
+        Remove-Item -LiteralPath $backup -Force
+        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Update to $($env:VFERDZ_UPDATE_TAG) installed."
+        Remove-Item -LiteralPath $scriptPath -Force
+        exit 0
+    } catch {
+        if (Test-Path -LiteralPath $backup) {
+            Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $backup -Destination $target -Force
+            Start-Process -FilePath $target -WorkingDirectory (Split-Path $target)
+        }
+        throw
+    }
+} catch {
+    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Update failed: $($_.Exception.Message)"
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "The update could not be installed. Your current version was kept or restored. Details are in %LOCALAPPDATA%\VFERDZ Converter\app.log.",
+            'VFERDZ Converter update',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    } catch {}
+    Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+}
+"""
+            log_folder = app_data_folder()
+            log_folder.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                suffix=".ps1",
+                prefix="vferdz-updater-",
+                dir=log_folder,
+                delete=False,
+            ) as script_file:
+                script_file.write(script)
+                script_path = Path(script_file.name)
+
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script_path),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=creation_flags,
+                env={
+                    **os.environ,
+                    "VFERDZ_UPDATE_TARGET": str(target_path),
+                    "VFERDZ_UPDATE_STAGED": str(staged_path),
+                    "VFERDZ_UPDATE_PARENT": str(os.getpid()),
+                    "VFERDZ_UPDATE_LOG": str(log_folder / "app.log"),
+                    "VFERDZ_UPDATE_TAG": tag,
+                },
+            )
+            staged_path = None
+            script_path = None
+            self._set_state(
+                "restarting",
+                "Update downloaded and verified. The app is restarting...",
+                100,
+            )
+            if self.shutdown_callback:
+                threading.Thread(target=self._shutdown_app, daemon=True).start()
+        except Exception as error:
+            logger.exception("Could not install update %s.", tag)
+            self._set_state(
+                "error",
+                "The update could not be installed.",
+                error=str(error),
+            )
+        finally:
+            for path in (archive_path, staged_path, script_path):
+                if path:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        logger.exception("Could not remove temporary update file %s.", path)
+
+    def _shutdown_app(self):
+        time.sleep(1)
+        self.shutdown_callback()
+
+
+update_manager = UpdateManager()
+
+
 class LocalAppHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _playlist_zip_filename(title, batch=None):
@@ -841,6 +1257,30 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self.send_error(403)
             return
 
+        request_path = urlsplit(self.path).path
+        if request_path == "/api/logs":
+            query = parse_qs(urlsplit(self.path).query)
+            modes = query.get("mode", [])
+            if len(modes) != 1 or modes[0] not in {"mp3", "mp4"}:
+                self._send_json(400, {"error": "Choose MP3 or MP4 logs."})
+                return
+            manager.snapshot()
+            self._send_json(200, {"logs": manager.get_logs(modes[0])})
+            return
+        if request_path == "/api/update/status":
+            self._send_json(
+                200,
+                {
+                    "supported": (
+                        sys.platform == "win32"
+                        and getattr(sys, "frozen", False)
+                        and Path(sys.executable).name.lower() == "vferdz converter.exe"
+                    ),
+                    **update_manager.snapshot(),
+                },
+            )
+            return
+
         static_files = {
             "/": ("Pages/index.html", "text/html; charset=utf-8"),
             "/index.html": ("Pages/index.html", "text/html; charset=utf-8"),
@@ -859,9 +1299,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self._send_brand_asset(self.path)
         elif self.path == "/api/version":
             try:
-                version = Path(__file__).with_name("VERSION").read_text(
-                    encoding="utf-8"
-                ).strip()
+                version = resource_path("VERSION").read_text(encoding="utf-8").strip()
             except OSError as error:
                 self._send_json(
                     500,
@@ -932,7 +1370,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _send_static_file(self, filename, content_type):
-        file_path = Path(__file__).parent.joinpath(*filename.split("/"))
+        file_path = resource_path(filename)
         try:
             contents = file_path.read_bytes()
         except OSError:
@@ -947,7 +1385,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
 
     def _send_brand_asset(self, request_path):
         asset_name = "logo.ico" if request_path.endswith(".ico") else "logo.png"
-        asset_path = Path(__file__).parent / "Assets" / "Images" / asset_name
+        asset_path = resource_path(Path("Assets") / "Images" / asset_name)
         if not asset_path.is_file():
             self.send_error(404)
             return
@@ -967,6 +1405,32 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             or self.headers.get("Origin") not in (None, expected_origin)
         ):
             self.send_error(403)
+            return
+        if self.path == "/api/update/install":
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length <= 0 or content_length > 4096:
+                    raise ValueError("The update request has an invalid size.")
+                body = json.loads(self.rfile.read(content_length))
+                tag = body.get("tag")
+                digest = body.get("digest")
+                if not isinstance(tag, str) or len(tag) > 64:
+                    raise ValueError("The release version is invalid.")
+                if not isinstance(digest, str) or len(digest) > 80:
+                    raise ValueError("The release checksum is invalid.")
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                AttributeError,
+                ValueError,
+            ) as error:
+                self._send_json(400, {"error": str(error)})
+                return
+            started, error = update_manager.start(tag, digest)
+            if not started:
+                self._send_json(409, {"error": error})
+                return
+            self._send_json(202, {"message": "The update is being downloaded."})
             return
         if self.path == "/api/stop":
             try:
@@ -1016,10 +1480,19 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": str(error)})
             return
 
-        if shutil.which("ffmpeg") is None:
+        try:
+            ffmpeg_path = Path(ffmpeg_executable())
+        except (FileNotFoundError, RuntimeError) as error:
+            logger.exception("Could not locate FFmpeg.")
             self._send_json(
                 503,
-                {"error": "FFmpeg is required. Install it and make sure it is on PATH."},
+                {"error": f"The bundled FFmpeg executable could not be loaded: {error}"},
+            )
+            return
+        if not ffmpeg_path.is_file():
+            self._send_json(
+                503,
+                {"error": "The bundled FFmpeg executable could not be found."},
             )
             return
         if not manager.start(url, mode, request_id):
@@ -1143,21 +1616,56 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             shutil.copyfileobj(archive, self.wfile)
 
     def log_message(self, format_string, *args):
-        print(f"[local app] {format_string % args}")
+        logger.debug("HTTP %s", format_string % args)
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), LocalAppHandler)
-    address = f"http://127.0.0.1:{server.server_port}/"
-    print(f"VFERDZ Converter is running at {address}")
-    print("Keep this window open while using the app. Press Ctrl+C to stop.")
-    webbrowser.open(address)
     try:
+        configure_logging()
+    except OSError as error:
+        show_startup_error(f"Could not initialize app logging: {error}")
+        return
+
+    server = None
+    icon = None
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), LocalAppHandler)
+        update_manager.shutdown_callback = server.shutdown
+        address = f"http://127.0.0.1:{server.server_port}/"
+
+        def open_app(icon, item):
+            webbrowser.open(address)
+
+        def exit_app(icon, item):
+            logger.info("App exit requested from the system tray.")
+            server.shutdown()
+            icon.stop()
+
+        with Image.open(
+            resource_path(Path("Assets") / "Images" / "logo.ico")
+        ) as tray_image:
+            icon = pystray.Icon(
+                "VFERDZ Converter",
+                tray_image.copy(),
+                "VFERDZ Converter",
+                menu=pystray.Menu(
+                    MenuItem("Open VFERDZ Converter", open_app, default=True),
+                    MenuItem("Exit", exit_app),
+                ),
+            )
+        icon.run_detached()
+        logger.info("VFERDZ Converter is running at %s", address)
+        if not webbrowser.open(address):
+            logger.warning("Could not open the app in a browser: %s", address)
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping the local app...")
+    except Exception as error:
+        logger.exception("The local app failed to start or stopped unexpectedly.")
+        show_startup_error(str(error))
     finally:
-        server.server_close()
+        if icon:
+            icon.stop()
+        if server:
+            server.server_close()
 
 
 if __name__ == "__main__":
