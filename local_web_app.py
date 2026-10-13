@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import secrets
@@ -8,6 +9,7 @@ import threading
 import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -17,8 +19,38 @@ from yt_dlp.utils import DownloadError
 
 
 DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP3"
+VIDEO_DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP4"
 ALLOWED_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 PLAYLIST_BATCH_SIZE = 10
+
+
+def mp4_format_selector(height):
+    return (
+        f"bestvideo[ext=mp4][height={height}]+bestaudio[ext=m4a]"
+        f"/best[ext=mp4][height={height}]"
+    )
+
+
+def youtube_js_runtime_options():
+    runtimes = {}
+    for runtime in ("deno", "node", "bun"):
+        executable = shutil.which(runtime)
+        if not executable and runtime == "deno":
+            try:
+                deno_files = distribution("deno").files or ()
+            except PackageNotFoundError:
+                deno_files = ()
+            executable = next(
+                (
+                    str(path)
+                    for path in map(distribution("deno").locate_file, deno_files)
+                    if path.name.lower() in {"deno", "deno.exe"} and path.is_file()
+                ),
+                None,
+            ) if deno_files else None
+        if executable:
+            runtimes[runtime] = {"path": executable}
+    return {"js_runtimes": runtimes or {"deno": {}}}
 
 
 def validate_youtube_mode_url(url, mode):
@@ -38,7 +70,9 @@ def validate_youtube_mode_url(url, mode):
     )
     if mode == "playlist" and not (is_playlist_url and has_playlist_id):
         raise ValueError("Playlist mode only accepts a YouTube playlist link.")
-    if mode == "single" and is_playlist_url:
+    if mode in {"single", "mp4"} and is_playlist_url:
+        if mode == "mp4":
+            raise ValueError("MP4 mode only accepts a single YouTube video link, not a playlist link.")
         raise ValueError(
             "Single mode accepts a music/video link, not a playlist link. "
             "Choose Playlist mode instead."
@@ -150,11 +184,15 @@ class DownloadManager:
             cancel_event = threading.Event()
             self.cancel_event = cancel_event
             self.state = {
-                "status": "preparing" if mode == "playlist" else "downloading",
+                "status": (
+                    "preparing" if mode in {"playlist", "mp4"} else "downloading"
+                ),
                 "progress": 0,
                 "message": (
                     "Preparing playlist..."
                     if mode == "playlist"
+                    else "Finding available MP4 qualities..."
+                    if mode == "mp4"
                     else "Starting download..."
                 ),
                 "mode": mode,
@@ -201,6 +239,9 @@ class DownloadManager:
     def _download(self, url, mode, cancel_event):
         if mode == "playlist":
             self._download_playlist(url, cancel_event)
+            return
+        if mode == "mp4":
+            self._download_mp4(url, cancel_event)
             return
 
         def on_progress(data):
@@ -253,8 +294,11 @@ class DownloadManager:
                         self.state["message"] = "Converting to MP3..."
 
         options = {
+            **youtube_js_runtime_options(),
             "format": "bestaudio/best",
-            "outtmpl": str(DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"),
+            "outtmpl": str(
+                DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"
+            ),
             "noplaylist": True,
             "windowsfilenames": True,
             "postprocessors": [],
@@ -269,17 +313,17 @@ class DownloadManager:
                 )
                 info = ydl.extract_info(url, download=True)
                 self._check_cancelled(cancel_event)
-                mp3_path = Path(ydl.prepare_filename(info)).with_suffix(".mp3")
-            if not mp3_path.is_file():
+                output_path = Path(ydl.prepare_filename(info)).with_suffix(".mp3")
+            if not output_path.is_file():
                 raise FileNotFoundError(
-                    f"Conversion finished but the MP3 was not found: "
+                    "Conversion finished but the MP3 was not found: "
                     f"{info.get('title') or 'audio'}"
                 )
             item = {
                 "title": info.get("title") or "Audio",
                 "thumbnail": self._safe_thumbnail(info.get("thumbnail") or ""),
-                "file_size": mp3_path.stat().st_size,
-                "path": mp3_path,
+                "file_size": output_path.stat().st_size,
+                "path": output_path,
                 "batch": 0,
             }
             with self.lock:
@@ -304,12 +348,189 @@ class DownloadManager:
                         error=str(error),
                     )
 
+    def _download_mp4(self, url, cancel_event):
+        try:
+            self._check_cancelled(cancel_event)
+            VIDEO_DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+            base_options = {
+                **youtube_js_runtime_options(),
+                "outtmpl": str(
+                    VIDEO_DOWNLOAD_FOLDER
+                    / "%(title)s [%(id)s] %(height)sp.%(ext)s"
+                ),
+                "merge_output_format": "mp4",
+                "noplaylist": True,
+                "windowsfilenames": True,
+                "progress_hooks": [],
+                "postprocessor_hooks": [],
+            }
+            with YoutubeDL(base_options) as ydl:
+                info = ydl.extract_info(url, download=False)
+                self._check_cancelled(cancel_event)
+                formats = info.get("formats") or []
+                heights = sorted(
+                    {
+                        item["height"]
+                        for item in formats
+                        if item.get("ext") == "mp4"
+                        and item.get("vcodec") != "none"
+                        and isinstance(item.get("height"), int)
+                    },
+                    reverse=True,
+                )
+                if not heights:
+                    raise ValueError(
+                        "This video has no MP4-compatible video formats."
+                    )
+
+                title = info.get("title") or "Video"
+                thumbnail = self._safe_thumbnail(info.get("thumbnail") or "")
+                ready_items = []
+                unavailable = []
+
+                for index, height in enumerate(heights, start=1):
+                    self._check_cancelled(cancel_event)
+                    quality = f"{height}p"
+
+                    def on_progress(data):
+                        self._check_cancelled(cancel_event)
+                        if data.get("status") != "downloading":
+                            return
+                        downloaded = data.get("downloaded_bytes", 0)
+                        total = (
+                            data.get("total_bytes")
+                            or data.get("total_bytes_estimate")
+                        )
+                        quality_progress = (
+                            min(99, int(downloaded * 100 / total))
+                            if total
+                            else 0
+                        )
+                        progress = int(
+                            ((index - 1) + quality_progress / 100)
+                            * 100
+                            / len(heights)
+                        )
+                        with self.lock:
+                            self._check_cancelled(cancel_event)
+                            self.state.update(
+                                status="downloading",
+                                progress=progress,
+                                message=(
+                                    f"Downloading {quality} MP4 "
+                                    f"({quality_progress}%)..."
+                                ),
+                            )
+
+                    def on_postprocessor(data):
+                        self._check_cancelled(cancel_event)
+                        if data.get("status") != "started":
+                            return
+                        with self.lock:
+                            self._check_cancelled(cancel_event)
+                            self.state.update(
+                                status="converting",
+                                progress=int((index - 1) * 100 / len(heights)),
+                                message=f"Combining {quality} video and audio into MP4...",
+                            )
+
+                    try:
+                        ydl.params.update(
+                            format=mp4_format_selector(height),
+                            progress_hooks=[on_progress],
+                            postprocessor_hooks=[on_postprocessor],
+                        )
+                        ydl.format_selector = ydl.build_format_selector(
+                            mp4_format_selector(height)
+                        )
+                        variant = ydl.process_ie_result(
+                            copy.deepcopy(info), download=True
+                        )
+                        self._check_cancelled(cancel_event)
+                        output_path = Path(
+                            ydl.prepare_filename(variant)
+                        ).with_suffix(".mp4")
+                        if not output_path.is_file():
+                            raise FileNotFoundError(
+                                f"The {quality} MP4 was not created."
+                            )
+                    except Exception as error:
+                        if cancel_event.is_set():
+                            raise
+                        unavailable.append(
+                            {
+                                "index": index,
+                                "title": quality,
+                                "error": str(error),
+                            }
+                        )
+                        print(f"[local app] Could not prepare {quality}: {error}")
+                        continue
+
+                    item = {
+                        "title": title,
+                        "quality": quality,
+                        "height": height,
+                        "thumbnail": thumbnail,
+                        "file_size": output_path.stat().st_size,
+                        "path": output_path,
+                        "batch": 0,
+                    }
+                    ready_items.append(item)
+                    with self.lock:
+                        self._check_cancelled(cancel_event)
+                        self.state["items"].append(item)
+                        self.state.update(
+                            status="downloading",
+                            progress=int(index * 100 / len(heights)),
+                            message=f"{quality} MP4 is ready.",
+                        )
+
+            if not ready_items:
+                raise RuntimeError(
+                    "Could not prepare any available MP4 qualities. "
+                    + "; ".join(
+                        f"{item['title']}: {item['error']}" for item in unavailable
+                    )
+                )
+            with self.lock:
+                self._check_cancelled(cancel_event)
+                self.state.update(
+                    status="done",
+                    progress=100,
+                    skipped_tracks=unavailable,
+                    message=(
+                        f"{len(ready_items)} MP4 quality "
+                        f"{'is' if len(ready_items) == 1 else 'options are'} ready to download."
+                        + (
+                            f" {len(unavailable)} other "
+                            f"{'quality was' if len(unavailable) == 1 else 'qualities were'} unavailable."
+                            if unavailable
+                            else ""
+                        )
+                    ),
+                )
+        except Exception as error:
+            with self.lock:
+                if cancel_event.is_set():
+                    self.state.update(
+                        status="stopped",
+                        message="Conversion was stopped.",
+                    )
+                else:
+                    self.state.update(
+                        status="error",
+                        message="The video qualities could not be prepared.",
+                        error=str(error),
+                    )
+
     def _download_playlist(self, url, cancel_event):
         try:
             self._check_cancelled(cancel_event)
             DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
             with YoutubeDL(
                 {
+                    **youtube_js_runtime_options(),
                     "extract_flat": "in_playlist",
                     "skip_download": True,
                     "noplaylist": False,
@@ -435,6 +656,7 @@ class DownloadManager:
                                     )
 
                         options = {
+                            **youtube_js_runtime_options(),
                             "format": "bestaudio/best",
                             "outtmpl": str(
                                 DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"
@@ -626,6 +848,8 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             "/updates.html": ("Pages/updates.html", "text/html; charset=utf-8"),
             "/converter": ("Pages/converter.html", "text/html; charset=utf-8"),
             "/converter.html": ("Pages/converter.html", "text/html; charset=utf-8"),
+            "/mp4-converter": ("Pages/mp4.html", "text/html; charset=utf-8"),
+            "/mp4.html": ("Pages/mp4.html", "text/html; charset=utf-8"),
             "/Assets/CSS/app.css": ("Assets/CSS/app.css", "text/css; charset=utf-8"),
             "/Assets/JS/app.js": ("Assets/JS/app.js", "text/javascript; charset=utf-8"),
         }
@@ -660,6 +884,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
                     "items": [
                         {
                             "title": item["title"],
+                            "quality": item.get("quality", ""),
                             "thumbnail": item["thumbnail"],
                             "file_size": item["file_size"],
                             "download_url": f"/api/file/{state['token']}/{index}",
@@ -778,7 +1003,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             url = body.get("url", "").strip()
             mode = body.get("mode", "single")
             request_id = body.get("request_id")
-            if mode not in {"single", "playlist"}:
+            if mode not in {"single", "playlist", "mp4"}:
                 raise ValueError("Choose single video or playlist mode.")
             if (
                 not isinstance(request_id, str)
@@ -829,18 +1054,24 @@ class LocalAppHandler(BaseHTTPRequestHandler):
         if not path or not path.is_file():
             self.send_error(404)
             return
-        filename = f"{item['title']}.mp3"
+        extension = "mp4" if state["mode"] == "mp4" else "mp3"
+        quality = f" {item['quality']}" if item.get("quality") else ""
+        filename = f"{item['title']}{quality}.{extension}"
         encoded_filename = quote(filename, safe="")
         self.send_response(200)
-        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header(
+            "Content-Type",
+            "video/mp4" if extension == "mp4" else "audio/mpeg",
+        )
         self.send_header("Content-Length", str(path.stat().st_size))
         self.send_header(
             "Content-Disposition",
-            f'attachment; filename="audio.mp3"; filename*=UTF-8\'\'{encoded_filename}',
+            f'attachment; filename="video.{extension}"; '
+            f"filename*=UTF-8''{encoded_filename}",
         )
         self.end_headers()
-        with path.open("rb") as audio:
-            shutil.copyfileobj(audio, self.wfile)
+        with path.open("rb") as media:
+            shutil.copyfileobj(media, self.wfile)
 
     def _send_playlist_zip(self, token, batch=None):
         state = manager.snapshot()
@@ -918,7 +1149,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
 def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), LocalAppHandler)
     address = f"http://127.0.0.1:{server.server_port}/"
-    print(f"YouTube to MP3 is running at {address}")
+    print(f"VFERDZ Converter is running at {address}")
     print("Keep this window open while using the app. Press Ctrl+C to stop.")
     webbrowser.open(address)
     try:

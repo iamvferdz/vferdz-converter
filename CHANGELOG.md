@@ -2,6 +2,17 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [Unreleased]
+
+### Added
+- **Video to MP4 Converter**: Added a YouTube single-video converter with MP4 downloads saved separately from MP3 files.
+- **MP4 Quality Downloads**: Added separate download options for each MP4 resolution available for a video.
+- **Footer Converter Chips**: Restyled converter links as compact chips.
+
+### Improved
+- **YouTube Format Availability**: Added the Deno runtime and yt-dlp JavaScript challenge components required for reliable YouTube format extraction.
+- **Launcher Dependency Check**: The Windows launcher now detects missing YouTube JavaScript runtime dependencies and explains how to install them.
+
 ## [0.1.2] - 10/08/2026
 
 ### Improved

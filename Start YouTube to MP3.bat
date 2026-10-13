@@ -8,9 +8,10 @@ if errorlevel 1 (
     goto :failed
 )
 
-python -c "import yt_dlp" >nul 2>nul
+python -c "import yt_dlp, yt_dlp_ejs, deno" >nul 2>nul
 if errorlevel 1 (
-    echo The app dependency is missing. Install it with:
+    echo The app dependencies or YouTube JavaScript runtime are missing.
+    echo Install or update them with:
     echo   python -m pip install -r requirements.txt
     goto :failed
 )

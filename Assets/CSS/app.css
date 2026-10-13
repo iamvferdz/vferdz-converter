@@ -223,13 +223,31 @@
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 8px;
     }
     .footer-link {
-      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
       text-decoration: none;
+      transition: border-color .15s ease, background .15s ease, color .15s ease;
     }
-    .footer-link:hover { color: var(--neon-red); text-decoration: underline; }
+    .footer-link:hover {
+      border-color: var(--primary-red);
+      background: var(--card);
+      color: var(--neon-red);
+    }
+    .footer-link:focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
     .release-list { display: grid; gap: 14px; }
     .release-card {
       padding: 20px 24px;
@@ -311,6 +329,7 @@
       border-radius: 12px;
       background: var(--page);
     }
+    .mode-tabs[hidden] { display: none; }
     .mode-tab {
       min-height: 48px;
       margin: 0;
@@ -633,6 +652,68 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       background: var(--card);
+    }
+    .mp4-quality-results { gap: 0; }
+    .mp4-quality-card {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+    }
+    .mp4-quality-card .thumbnail { width: min(100%, 320px); }
+    .mp4-quality-details { min-width: 0; }
+    .mp4-quality-details .result-title { margin-bottom: 6px; font-size: 18px; }
+    .mp4-quality-choices {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 14px;
+    }
+    .mp4-quality-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: auto;
+      min-height: 40px;
+      margin: 0;
+      padding: 0 13px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: border-color .15s ease, background .15s ease, color .15s ease;
+    }
+    .mp4-quality-chip:hover {
+      border-color: var(--primary-red);
+      background: var(--primary-red);
+      color: #fff;
+    }
+    .mp4-quality-chip.clicked,
+    .mp4-quality-chip.clicked:hover {
+      border-color: var(--dark-red);
+      background: var(--dark-red);
+      color: #fff;
+    }
+    .mp4-quality-chip:focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+    .mp4-quality-chip svg {
+      width: 17px;
+      height: 17px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.9;
     }
     .view-list .result-item {
       gap: 14px;
