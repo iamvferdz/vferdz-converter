@@ -35,8 +35,8 @@
         <div class="workspace-grid">
           <section class="panel conversion-panel" aria-labelledby="conversion-heading">
             <h2 id="conversion-heading" class="panel-heading">Convert to MP4</h2>
-            <p class="panel-intro">Paste a YouTube video link to prepare downloadable MP4 files for each available resolution.</p>
-            <div class="mode-tabs" role="tablist" aria-label="Conversion type" hidden>
+            <p class="panel-intro">Convert a single video into available MP4 resolutions, or convert a playlist into MP4 files.</p>
+            <div class="mode-tabs" role="tablist" aria-label="Conversion type">
               <button id="single-tab" class="mode-tab" type="button" role="tab" aria-selected="true" aria-controls="form">Single</button>
               <button id="playlist-tab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="form">Playlist</button>
             </div>
@@ -64,8 +64,19 @@
           <section class="panel downloads-panel" aria-labelledby="downloads-heading">
             <h2 id="downloads-heading" class="panel-heading">Your downloads</h2>
             <div class="download-toolbar">
-              <p id="downloads-mode" class="downloads-mode">Available MP4 qualities will appear here</p>
-              <div id="view-toolbar" class="view-toolbar" hidden></div>
+              <p id="downloads-mode" class="downloads-mode">Available MP4 qualities or playlist videos will appear here</p>
+              <div id="view-toolbar" class="view-toolbar" hidden>
+                <div class="download-actions">
+                  <div class="view-switch" role="group" aria-label="Playlist download layout">
+                    <button class="view-button" type="button" data-view="list" aria-label="List view" aria-pressed="false" title="List view">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"></path><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>
+                    </button>
+                    <button class="view-button" type="button" data-view="grid" aria-label="Grid view" aria-pressed="false" title="Grid view">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="8" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect><rect x="13" y="13" width="8" height="8" rx="1"></rect></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div id="playlist-summary" class="playlist-summary" hidden>
               <div class="playlist-summary-content">
@@ -84,7 +95,7 @@
               <summary id="skipped-heading"></summary>
               <ul id="skipped-list"></ul>
             </details>
-            <div id="empty-state" class="empty-state">Available video qualities will appear here after conversion.<br>Start a conversion to see your downloads.</div>
+            <div id="empty-state" class="empty-state">Available video qualities or playlist videos will appear here after conversion.<br>Start a conversion to see your downloads.</div>
             <section id="result-list" class="result-list" aria-label="Converted video files" hidden></section>
           </section>
         </div>

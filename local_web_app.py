@@ -148,7 +148,9 @@ def validate_youtube_mode_url(url, mode):
     is_playlist_url = hostname != "youtu.be" and (
         parsed_url.path.rstrip("/") == "/playlist" or has_playlist_id
     )
-    if mode == "playlist" and not (is_playlist_url and has_playlist_id):
+    if mode in {"playlist", "mp4_playlist"} and not (
+        is_playlist_url and has_playlist_id
+    ):
         raise ValueError("Playlist mode only accepts a YouTube playlist link.")
     if mode in {"single", "mp4"} and is_playlist_url:
         if mode == "mp4":
@@ -255,7 +257,7 @@ class DownloadManager:
 
     @staticmethod
     def _log_mode(mode):
-        return "mp4" if mode == "mp4" else "mp3"
+        return "mp4" if mode in {"mp4", "mp4_playlist"} else "mp3"
 
     def _record_state_log(self):
         mode = self._log_mode(self.state["mode"])
@@ -307,12 +309,14 @@ class DownloadManager:
             self.cancel_event = cancel_event
             self.state = {
                 "status": (
-                    "preparing" if mode in {"playlist", "mp4"} else "downloading"
+                    "preparing"
+                    if mode in {"playlist", "mp4", "mp4_playlist"}
+                    else "downloading"
                 ),
                 "progress": 0,
                 "message": (
                     "Preparing playlist..."
-                    if mode == "playlist"
+                    if mode in {"playlist", "mp4_playlist"}
                     else "Finding available MP4 qualities..."
                     if mode == "mp4"
                     else "Starting download..."
@@ -361,8 +365,12 @@ class DownloadManager:
             raise DownloadError("Conversion was stopped.")
 
     def _download(self, url, mode, cancel_event):
-        if mode == "playlist":
-            self._download_playlist(url, cancel_event)
+        if mode in {"playlist", "mp4_playlist"}:
+            self._download_playlist(
+                url,
+                cancel_event,
+                output_format="mp4" if mode == "mp4_playlist" else "mp3",
+            )
             return
         if mode == "mp4":
             self._download_mp4(url, cancel_event)
@@ -654,10 +662,15 @@ class DownloadManager:
                         error=str(error),
                     )
 
-    def _download_playlist(self, url, cancel_event):
+    def _download_playlist(self, url, cancel_event, output_format="mp3"):
         try:
             self._check_cancelled(cancel_event)
-            DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+            entry_label = "video" if output_format == "mp4" else "track"
+            entry_plural = f"{entry_label}s"
+            download_folder = (
+                VIDEO_DOWNLOAD_FOLDER if output_format == "mp4" else DOWNLOAD_FOLDER
+            )
+            download_folder.mkdir(parents=True, exist_ok=True)
             with YoutubeDL(
                 {
                     **youtube_js_runtime_options(),
@@ -697,11 +710,14 @@ class DownloadManager:
                 self._check_cancelled(cancel_event)
                 self.state.update(
                     status="downloading",
-                    message=f"Playlist found: {total} tracks. Starting batch 1 of {batch_count}.",
+                    message=(
+                        f"Playlist found: {total} {entry_plural}. "
+                        f"Starting batch 1 of {batch_count}."
+                    ),
                     playlist_title=(
                         playlist.get("title")
                         or playlist.get("playlist_title")
-                        or "mp3youtubeplaylist"
+                        or "youtubeplaylist"
                     ),
                     playlist_thumbnail=playlist_thumbnail,
                     playlist_creator=playlist_creator,
@@ -726,9 +742,10 @@ class DownloadManager:
                     self._check_cancelled(cancel_event)
                     playlist_index = batch_start + batch_offset + 1
                     title = (
-                        entry.get("title") or f"Track {playlist_index}"
+                        entry.get("title")
+                        or f"{entry_label.title()} {playlist_index}"
                         if isinstance(entry, dict)
-                        else f"Track {playlist_index}"
+                        else f"{entry_label.title()} {playlist_index}"
                     )
                     with self.lock:
                         self._check_cancelled(cancel_event)
@@ -736,7 +753,8 @@ class DownloadManager:
                             status="downloading",
                             message=(
                                 f"Batch {batch_number} of {batch_count}: "
-                                f"downloading track {playlist_index} of {total}..."
+                                f"downloading {entry_label} {playlist_index} "
+                                f"of {total}..."
                             ),
                         )
 
@@ -768,7 +786,8 @@ class DownloadManager:
                                     progress=progress,
                                     message=(
                                         f"Batch {batch_number} of {batch_count}: "
-                                        f"downloading track {playlist_index} of {total} "
+                                        f"downloading {entry_label} {playlist_index} "
+                                        f"of {total} "
                                         f"({track_progress}%)."
                                     ),
                                 )
@@ -782,8 +801,8 @@ class DownloadManager:
                                         status="converting",
                                         message=(
                                             f"Batch {batch_number} of {batch_count}: "
-                                            f"converting track {playlist_index} of "
-                                            f"{total} to MP3..."
+                                            f"converting {entry_label} {playlist_index} of "
+                                            f"{total} to {output_format.upper()}..."
                                         ),
                                     )
 
@@ -792,34 +811,46 @@ class DownloadManager:
                             "ffmpeg_location": ffmpeg_executable(),
                             "quiet": True,
                             "no_warnings": True,
-                            "format": "bestaudio/best",
-                            "outtmpl": str(
-                                DOWNLOAD_FOLDER / "%(title)s [%(id)s].%(ext)s"
+                            "format": (
+                                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+                                if output_format == "mp4"
+                                else "bestaudio/best"
                             ),
+                            "outtmpl": str(download_folder / "%(title)s [%(id)s].%(ext)s"),
                             "noplaylist": True,
                             "windowsfilenames": True,
-                            "postprocessors": [],
+                            "merge_output_format": "mp4"
+                            if output_format == "mp4"
+                            else None,
                             "progress_hooks": [on_progress],
                             "postprocessor_hooks": [on_postprocessor],
                         }
+                        if output_format == "mp4":
+                            options["merge_output_format"] = "mp4"
+                        else:
+                            options["postprocessors"] = []
                         with YoutubeDL(options) as ydl:
-                            ydl.add_post_processor(
-                                CancellableFFmpegExtractAudioPP(ydl, cancel_event)
-                            )
+                            if output_format == "mp3":
+                                ydl.add_post_processor(
+                                    CancellableFFmpegExtractAudioPP(
+                                        ydl, cancel_event
+                                    )
+                                )
                             info = ydl.extract_info(video_url, download=True)
                             self._check_cancelled(cancel_event)
                             if not info:
                                 raise ValueError(
-                                    f"Could not download playlist track "
+                                    f"Could not download playlist {entry_label} "
                                     f"{playlist_index}: {title}"
                                 )
-                            mp3_path = Path(ydl.prepare_filename(info)).with_suffix(
-                                ".mp3"
-                            )
-                        if not mp3_path.is_file():
+                            output_path = Path(
+                                ydl.prepare_filename(info)
+                            ).with_suffix(f".{output_format}")
+                        if not output_path.is_file():
                             raise FileNotFoundError(
-                                f"Conversion finished but an MP3 was not found for "
-                                f"track {playlist_index}: "
+                                f"Conversion finished but an {output_format.upper()} "
+                                f"was not found for "
+                                f"{entry_label} {playlist_index}: "
                                 f"{info.get('title') or title}"
                             )
                         item = {
@@ -827,8 +858,8 @@ class DownloadManager:
                             "thumbnail": self._safe_thumbnail(
                                 info.get("thumbnail") or entry.get("thumbnail") or ""
                             ),
-                            "file_size": mp3_path.stat().st_size,
-                            "path": mp3_path,
+                            "file_size": output_path.stat().st_size,
+                            "path": output_path,
                             "batch": batch_number,
                         }
                         with self.lock:
@@ -851,7 +882,7 @@ class DownloadManager:
                                 status="downloading",
                                 progress=int(playlist_index * 100 / total),
                                 message=(
-                                    f"Skipped track {playlist_index} of {total} "
+                                    f"Skipped {entry_label} {playlist_index} of {total} "
                                     f"({title}); continuing with the playlist."
                                 ),
                             )
@@ -866,12 +897,12 @@ class DownloadManager:
                 ready_count = len(self.state["items"])
                 skipped_count = len(self.state["skipped_tracks"])
                 completion_message = (
-                    f"Playlist complete: {ready_count} of {total} tracks ready."
+                    f"Playlist complete: {ready_count} of {total} {entry_plural} ready."
                 )
                 if skipped_count:
                     completion_message += (
                         f" Skipped {skipped_count} unavailable or failed "
-                        f"{'track' if skipped_count == 1 else 'tracks'}."
+                        f"{entry_label if skipped_count == 1 else entry_plural}."
                     )
                 self.state.update(
                     status="done",
@@ -890,9 +921,9 @@ class DownloadManager:
                         status="error",
                         message=(
                             f"Playlist could not be processed. "
-                            f"{len(self.state['items'])} tracks are ready and "
-                            f"{len(self.state['skipped_tracks'])} tracks were skipped."
-                            if self.state["mode"] == "playlist"
+                            f"{len(self.state['items'])} items are ready and "
+                            f"{len(self.state['skipped_tracks'])} items were skipped."
+                            if self.state["mode"] in {"playlist", "mp4_playlist"}
                             else "The download could not be completed."
                         ),
                         error=str(error),
@@ -1233,7 +1264,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _playlist_zip_filename(title, batch=None):
         safe_title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", title).strip(" .-")
-        safe_title = safe_title[:120].rstrip(" .-") or "mp3youtubeplaylist"
+        safe_title = safe_title[:120].rstrip(" .-") or "youtubeplaylist"
         suffix = f"-batch-{batch}" if batch is not None else ""
         return f"vferdzconverter-{safe_title}{suffix}.zip"
 
@@ -1340,11 +1371,12 @@ class LocalAppHandler(BaseHTTPRequestHandler):
                     "zip_filename": (
                         self._playlist_zip_filename(state["playlist_title"])
                         if state["playlist_title"]
-                        else self._playlist_zip_filename("mp3youtubeplaylist")
+                        else self._playlist_zip_filename("youtubeplaylist")
                     ),
                     "zip_url": (
                         f"/api/zip/{state['token']}"
-                        if state["items"] and state["mode"] == "playlist"
+                        if state["items"]
+                        and state["mode"] in {"playlist", "mp4_playlist"}
                         else ""
                     ),
                     "error": state["error"],
@@ -1467,7 +1499,7 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             url = body.get("url", "").strip()
             mode = body.get("mode", "single")
             request_id = body.get("request_id")
-            if mode not in {"single", "playlist", "mp4"}:
+            if mode not in {"single", "playlist", "mp4", "mp4_playlist"}:
                 raise ValueError("Choose single video or playlist mode.")
             if (
                 not isinstance(request_id, str)
@@ -1527,7 +1559,9 @@ class LocalAppHandler(BaseHTTPRequestHandler):
         if not path or not path.is_file():
             self.send_error(404)
             return
-        extension = "mp4" if state["mode"] == "mp4" else "mp3"
+        extension = (
+            "mp4" if state["mode"] in {"mp4", "mp4_playlist"} else "mp3"
+        )
         quality = f" {item['quality']}" if item.get("quality") else ""
         filename = f"{item['title']}{quality}.{extension}"
         encoded_filename = quote(filename, safe="")
@@ -1562,11 +1596,14 @@ class LocalAppHandler(BaseHTTPRequestHandler):
             state["status"] not in {
                 "downloading", "converting", "stopping", "stopped", "done", "error"
             }
-            or state["mode"] != "playlist"
+            or state["mode"] not in {"playlist", "mp4_playlist"}
             or not state["items"]
             or (batch is not None and batch < 1)
         ):
-            self.send_error(404, "No playlist MP3 files are currently available.")
+            extension = "MP4" if state["mode"] == "mp4_playlist" else "MP3"
+            self.send_error(
+                404, f"No playlist {extension} files are currently available."
+            )
             return
         items = [
             item for item in state["items"]
@@ -1575,15 +1612,16 @@ class LocalAppHandler(BaseHTTPRequestHandler):
         if not items:
             self.send_error(
                 404,
-                "No MP3 files are ready for this batch yet, or the playlist session "
+                f"No {'MP4' if state['mode'] == 'mp4_playlist' else 'MP3'} files "
+                "are ready for this batch yet, or the playlist session "
                 "has expired. Keep the app running and try again after a track is ready.",
             )
             return
         if any(not item["path"].is_file() for item in items):
             self.send_error(
                 404,
-                "One or more converted MP3 files are no longer available. "
-                "Check that the files still exist in Downloads\\YouTube to MP3.",
+                "One or more converted playlist files are no longer available. "
+                "Check that the files still exist in the corresponding downloads folder.",
             )
             return
         filename = self._playlist_zip_filename(state["playlist_title"], batch)
