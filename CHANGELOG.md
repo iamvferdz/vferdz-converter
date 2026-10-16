@@ -2,6 +2,11 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [Unreleased]
+
+### Added
+- **MP4 Playlist Conversion**: Added playlist conversion to MP4 with best-available MP4 output per video, batched processing, individual downloads, and batch or full-playlist ZIP downloads.
+
 ## [0.3.0] - 10/13/2026
 
 ### Added

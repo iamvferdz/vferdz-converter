@@ -34,6 +34,11 @@ const form = document.querySelector("#form");
     const conversionWaitNotice = outputFormat === "mp4"
       ? "Please wait while available resolutions are downloaded and combined into MP4. Keep this page open."
       : "Please wait while conversion finishes. Keep this page open; playlist tracks are processed one at a time.";
+    function conversionWaitNoticeFor(selectedMode = mode) {
+      return outputFormat === "mp4" && selectedMode === "playlist"
+        ? "Please wait while playlist videos are converted to MP4, one at a time. Keep this page open."
+        : conversionWaitNotice;
+    }
     const githubReleasesUrl =
       "https://api.github.com/repos/iamvferdz/vferdz-converter/releases?per_page=100";
     let publishedReleasesCache = null;
@@ -579,7 +584,9 @@ const form = document.querySelector("#form");
     }
 
     function convertButtonLabel(selectedMode = mode) {
-      if (outputFormat === "mp4") return "Convert to MP4";
+      if (outputFormat === "mp4") {
+        return selectedMode === "playlist" ? "Convert Playlist to MP4" : "Convert to MP4";
+      }
       return selectedMode === "playlist" ? "Convert Playlist" : "Convert to MP3";
     }
 
@@ -645,7 +652,9 @@ const form = document.querySelector("#form");
     ) {
       skippedList.replaceChildren();
       skippedSummary.hidden = skippedTracks.length === 0;
-      const hasPlaylistSummary = resultMode === "playlist" && playlistTitle;
+      const isPlaylist = resultMode === "playlist" || resultMode === "mp4_playlist";
+      const isMp4 = resultMode === "mp4" || resultMode === "mp4_playlist";
+      const hasPlaylistSummary = isPlaylist && playlistTitle;
       playlistSummary.hidden = !hasPlaylistSummary;
       if (hasPlaylistSummary) {
         playlistSummaryTitle.textContent = playlistTitle;
@@ -663,11 +672,15 @@ const form = document.querySelector("#form");
       if (skippedTracks.length) {
         skippedHeading.textContent = resultMode === "mp4"
           ? `Unavailable qualities (${skippedTracks.length})`
+          : isMp4
+            ? `Skipped videos (${skippedTracks.length})`
           : `Skipped tracks (${skippedTracks.length})`;
         if (items.length === 0) {
           emptyState.textContent = resultMode === "mp4"
             ? "No MP4 qualities were prepared. See unavailable qualities above for details."
-            : "No tracks were converted successfully. See skipped tracks above for details.";
+            : isMp4
+              ? "No videos were converted successfully. See skipped videos above for details."
+              : "No tracks were converted successfully. See skipped tracks above for details.";
         }
         for (const skipped of skippedTracks) {
           const entry = document.createElement("li");
@@ -682,10 +695,10 @@ const form = document.querySelector("#form");
         renderedBatch = 0;
         currentBatchItems = null;
       }
-      zipDownload.hidden = resultMode !== "playlist" || !zipUrl;
-      viewToolbar.hidden = resultMode !== "playlist";
+      zipDownload.hidden = !isPlaylist || !zipUrl;
+      viewToolbar.hidden = !isPlaylist;
       const safeZipFilename =
-        zipFilename || "vferdzconverter-mp3youtubeplaylist.zip";
+        zipFilename || "vferdzconverter-youtubeplaylist.zip";
       if (resultMode === "mp4") {
         downloadsMode.textContent = items.length
           ? `${items.length} MP4 ${items.length === 1 ? "quality" : "qualities"} available`
@@ -750,9 +763,9 @@ const form = document.querySelector("#form");
         return;
       }
       resultList.classList.remove("mp4-quality-results");
-      downloadsMode.textContent = resultMode === "playlist"
+      downloadsMode.textContent = isPlaylist
         ? playlistTotal
-          ? `${items.length} of ${playlistTotal} playlist tracks ready`
+          ? `${items.length} of ${playlistTotal} playlist ${isMp4 ? "videos" : "tracks"} ready`
           : "Preparing playlist batches..."
         : `Single ${resultMode === "mp4" ? "MP4" : "MP3"}`;
       if (!zipDownload.hidden) {
@@ -760,7 +773,7 @@ const form = document.querySelector("#form");
         zipDownload.download = safeZipFilename;
         const zipDescription = status === "done"
           ? "Download the entire playlist as a ZIP"
-          : "Download all ready playlist tracks as a ZIP";
+          : `Download all ready playlist ${isMp4 ? "videos" : "tracks"} as a ZIP`;
         zipDownload.setAttribute("aria-label", zipDescription);
         zipDownload.title = zipDescription;
       } else {
@@ -797,11 +810,12 @@ const form = document.querySelector("#form");
           const zipBaseName = safeZipFilename.replace(/\.zip$/i, "");
           batchDownload.download =
             `${zipBaseName}-batch-${item.batch}.zip`;
+          const itemFormat = isMp4 ? "MP4" : "MP3";
           batchDownload.setAttribute(
             "aria-label",
-            `Download all MP3s in batch ${item.batch} as a ZIP`,
+            `Download all ${itemFormat}s in batch ${item.batch} as a ZIP`,
           );
-          batchDownload.title = `Download all MP3s in batch ${item.batch} as a ZIP`;
+          batchDownload.title = `Download all ${itemFormat} files in batch ${item.batch} as a ZIP`;
           batchDownload.innerHTML =
             '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg><span>Download batch</span>';
           batchDownload.addEventListener("click", () => {
@@ -847,7 +861,7 @@ const form = document.querySelector("#form");
         title.textContent = item.title;
         const size = document.createElement("p");
         size.className = "file-size";
-        const itemFormat = resultMode === "mp4" ? "MP4" : "MP3";
+        const itemFormat = isMp4 ? "MP4" : "MP3";
         size.textContent = `${itemFormat} file size: ${formatFileSize(item.file_size)}`;
         const link = document.createElement("a");
         link.className = "download track-download";
@@ -860,7 +874,7 @@ const form = document.querySelector("#form");
         link.setAttribute("aria-label", `Download ${item.title} as ${itemFormat}`);
         link.title = `Download ${item.title} as ${itemFormat}`;
         link.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"></path><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg>';
-        if (resultMode !== "playlist") {
+        if (!isPlaylist) {
           const downloadLabel = document.createElement("span");
           downloadLabel.textContent = `Download ${itemFormat}`;
           link.append(downloadLabel);
@@ -870,7 +884,7 @@ const form = document.querySelector("#form");
       }
       renderedItems = items.length;
       resultList.hidden = items.length === 0;
-      resultList.classList.toggle("single-results", resultMode !== "playlist");
+      resultList.classList.toggle("single-results", !isPlaylist);
       emptyState.hidden = items.length > 0;
     }
 
@@ -980,6 +994,9 @@ const form = document.querySelector("#form");
       }
       if (/requested format is not available|no suitable format/.test(normalized)) {
         if (outputFormat === "mp4") {
+          if (mode === "playlist") {
+            return "YouTube did not provide a compatible MP4 stream for this video. The rest of the playlist will continue.";
+          }
           return "YouTube did not provide a compatible stream for this resolution. Other available qualities may still be downloaded.";
         }
         return "No compatible video formats were found. Check that the JavaScript runtime and FFmpeg are available, then try a lower quality or another video.";
@@ -1022,7 +1039,7 @@ const form = document.querySelector("#form");
         stopButton.disabled = result.status === "stopping";
         conversionNotice.hidden = !isActive;
         if (result.status !== "stopping" && isActive) {
-          conversionNotice.textContent = conversionWaitNotice;
+          conversionNotice.textContent = conversionWaitNoticeFor();
         }
         showResults(
           result.items,
@@ -1102,7 +1119,9 @@ const form = document.querySelector("#form");
       currentBatchItems = null;
       emptyState.hidden = false;
       emptyState.textContent = mode === "playlist"
-        ? "Playlist tracks will appear here as each one is converted."
+        ? outputFormat === "mp4"
+          ? "Playlist videos will appear here as each one is converted."
+          : "Playlist tracks will appear here as each one is converted."
         : `Your ${mediaType} download will appear here when conversion is complete.`;
       status.classList.remove("error");
       status.textContent = "Starting download...";
@@ -1112,6 +1131,7 @@ const form = document.querySelector("#form");
       button.disabled = true;
       stopButton.hidden = true;
       stopButton.disabled = false;
+      conversionNotice.textContent = conversionWaitNoticeFor();
       conversionNotice.hidden = false;
       setModeTabsDisabled(true);
       try {
@@ -1120,7 +1140,9 @@ const form = document.querySelector("#form");
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: input.value.trim(),
-            mode: outputFormat === "mp4" ? "mp4" : mode,
+            mode: outputFormat === "mp4"
+              ? mode === "playlist" ? "mp4_playlist" : "mp4"
+              : mode,
             request_id: requestId,
           })
         });
@@ -1168,7 +1190,7 @@ const form = document.querySelector("#form");
         status.textContent = error.message || "Could not stop the conversion.";
         status.classList.add("error");
         stopButton.disabled = false;
-        conversionNotice.textContent = conversionWaitNotice;
+        conversionNotice.textContent = conversionWaitNoticeFor();
       }
     });
 
