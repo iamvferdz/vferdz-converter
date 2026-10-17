@@ -4,9 +4,36 @@
 
 <h1 align="center">VFERDZ | VFERDZ Converter</h1>
 
-# YouTube to MP3
+<p align="center">
+  VFERDZ Converter is a local Windows app built to bring <strong>many conversion tools together in one place</strong>, with tools for formats such as documents, images, audio, and video. Its current converters handle <strong>YouTube music to MP3 and YouTube videos to MP4</strong>. The app runs in your browser, with processing and downloads handled on your computer.
+</p>
 
-A small local web app. The interface runs in your browser, while video and MP3 downloads and conversions happen on your computer.
+## Table of contents
+
+- [Converter list](#converter-list)
+  - [Current converters](#current-converters)
+  - [Planned converters](#planned-converters)
+- [Requirements](#requirements)
+- [Download and run](#download-and-run)
+- [Features](#features)
+- [Check for and install updates](#check-for-and-install-updates)
+- [Development](#development)
+- [Releases](#releases)
+
+## Converter list
+
+### Current converters
+
+- [x] YouTube to MP3
+- [x] YouTube to MP4
+
+### Planned converters
+
+These are ideas for future updates; availability and timing may change.
+
+- [ ] PDF conversion tools
+- [ ] Image to ICO converter
+- [ ] More document, image, audio, and video converters
 
 ## Requirements
 
@@ -21,17 +48,6 @@ A small local web app. The interface runs in your browser, while video and MP3 d
 4. Right-click the tray icon and choose **Exit** to stop the app.
 
 The standalone executable bundles Python, the app dependencies, Deno, and FFmpeg. Python, Deno, and FFmpeg do not need to be installed separately; the app does not download or install runtimes on the computer. The backend runs without a command-prompt window. Each converter page shows its recent conversion activity. App diagnostic logs are saved to `%LOCALAPPDATA%\VFERDZ Converter\app.log`.
-
-## Development
-
-To run from source, clone or download the project from GitHub and install Python 3.10 or newer. From the project folder, install the dependencies and start the development app:
-
-```bat
-python -m pip install -r requirements.txt
-run-dev.bat
-```
-
-`run-dev.bat` is for development only. It starts `local_web_app.py` from the project folder; the browser opens automatically, and the console stays available while the app runs. Press **Ctrl+C** to stop it. Source mode adds the tray icon and uses FFmpeg from `PATH` when available. Release builds are still produced automatically by the GitHub Actions workflow described below.
 
 ## Features
 
@@ -75,6 +91,17 @@ Converted MP3 files are stored separately in your user `Downloads\YouTube to MP3
 The browser tab icon and header logo are loaded from `Assets\Images\logo.ico` and `Assets\Images\logo.png`.
 
 Only download content you have permission to use.
+
+## Development
+
+To run from source, clone or download the project from GitHub and install Python 3.10 or newer. From the project folder, install the dependencies and start the development app:
+
+```bat
+python -m pip install -r requirements.txt
+run-dev.bat
+```
+
+`run-dev.bat` is for development only. It starts `local_web_app.py` from the project folder; the browser opens automatically, and the console stays available while the app runs. Press **Ctrl+C** to stop it. Source mode adds the tray icon and uses FFmpeg from `PATH` when available. Release builds are still produced automatically by the GitHub Actions workflow described below.
 
 ## Releases
 
