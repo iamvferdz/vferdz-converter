@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.ico" width="80" alt="VFERDZ — Anime Expeditions logo">
+  <img src="/Assets/Images/logo.ico" width="80" alt="VFERDZ — Anime Expeditions logo">
 </p>
 
 <h1 align="center">VFERDZ | VFERDZ Converter</h1>
