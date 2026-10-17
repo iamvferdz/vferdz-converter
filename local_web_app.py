@@ -1142,10 +1142,12 @@ $target = $env:VFERDZ_UPDATE_TARGET
 $staged = $env:VFERDZ_UPDATE_STAGED
 $backup = "$target.previous-$([guid]::NewGuid().ToString('N'))"
 $log = $env:VFERDZ_UPDATE_LOG
+$readyFile = Join-Path (Split-Path $log) ".vferdz-ready-$([guid]::NewGuid().ToString('N'))"
 $scriptPath = $MyInvocation.MyCommand.Path
+$app = $null
+$replaced = $false
 try {
     Wait-Process -Id ([int]$env:VFERDZ_UPDATE_PARENT) -ErrorAction SilentlyContinue
-    $replaced = $false
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
         try {
             [System.IO.File]::Replace($staged, $target, $backup, $true)
@@ -1158,35 +1160,103 @@ try {
     if (-not $replaced) {
         throw 'The app file remained in use or could not be replaced.'
     }
-    try {
+
+    $started = $false
+    for ($attempt = 1; $attempt -le 2 -and -not $started; $attempt++) {
+        Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
+        $env:VFERDZ_UPDATE_READY_FILE = $readyFile
+        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Starting updated app (attempt $attempt of 2)."
         $app = Start-Process -FilePath $target -WorkingDirectory (Split-Path $target) -PassThru
-        Start-Sleep -Seconds 3
-        if (-not (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)) {
-            throw 'The updated app did not stay running.'
+        $startupFailure = 'The app did not write its startup readiness marker.'
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-Path -LiteralPath $readyFile) {
+                try {
+                    $address = (Get-Content -LiteralPath $readyFile -Raw).Trim()
+                    if ($address -notmatch '^http://127\.0\.0\.1:\d+/$') {
+                        throw 'The app wrote an invalid startup address.'
+                    }
+                    $health = Invoke-RestMethod -Uri ($address + 'api/version') -TimeoutSec 2
+                    if ($health.version -eq $env:VFERDZ_UPDATE_TAG.TrimStart('v')) {
+                        $started = $true
+                        break
+                    }
+                    $startupFailure = "The readiness endpoint returned version '$($health.version)'."
+                } catch {
+                    $startupFailure = $_.Exception.Message
+                }
+            }
+            Start-Sleep -Milliseconds 500
         }
-        Remove-Item -LiteralPath $backup -Force
-        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Update to $($env:VFERDZ_UPDATE_TAG) installed."
-        Remove-Item -LiteralPath $scriptPath -Force
-        exit 0
-    } catch {
-        if (Test-Path -LiteralPath $backup) {
-            Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
-            Move-Item -LiteralPath $backup -Destination $target -Force
-            Start-Process -FilePath $target -WorkingDirectory (Split-Path $target)
+
+        if (-not $started) {
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Updated app startup attempt $attempt failed its health check: $startupFailure"
+            if (Get-Process -Id $app.Id -ErrorAction SilentlyContinue) {
+                Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+                Wait-Process -Id $app.Id -Timeout 5 -ErrorAction SilentlyContinue
+            }
+            if ($attempt -lt 2) {
+                Start-Sleep -Seconds 2
+            }
         }
-        throw
     }
+
+    if (-not $started) {
+        throw 'The updated app did not become ready after two startup attempts.'
+    }
+
+    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Update to $($env:VFERDZ_UPDATE_TAG) installed."
+    try {
+        Remove-Item -LiteralPath $backup -Force
+    } catch {
+        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) WARNING Updated app started, but the previous executable backup could not be removed: $($_.Exception.Message)"
+    }
+    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+    exit 0
 } catch {
+    if ($app -and (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)) {
+        Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $app.Id -Timeout 5 -ErrorAction SilentlyContinue
+    }
+    $restored = $false
+    if (Test-Path -LiteralPath $backup) {
+        try {
+            $failedTarget = "$target.failed-$([guid]::NewGuid().ToString('N'))"
+            [System.IO.File]::Replace($backup, $target, $failedTarget, $true)
+            $restored = $true
+            Remove-Item -LiteralPath $failedTarget -Force -ErrorAction SilentlyContinue
+        } catch {
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Could not restore the previous app executable: $($_.Exception.Message)"
+        }
+    } elseif (-not $replaced) {
+        $restored = $true
+    }
+    if ($restored) {
+        Remove-Item Env:VFERDZ_UPDATE_READY_FILE -ErrorAction SilentlyContinue
+        try {
+            Start-Process -FilePath $target -WorkingDirectory (Split-Path $target)
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Previous app version was restored and its launch was requested."
+        } catch {
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Previous app version was restored, but could not be launched: $($_.Exception.Message)"
+        }
+    }
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Update failed: $($_.Exception.Message)"
     try {
+        $message = if ($restored) {
+            "The updated app could not start. The previous version was restored. Details are in $log."
+        } else {
+            "The updated app could not start, and the previous version could not be confirmed as restored. Check $log."
+        }
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show(
-            "The update could not be installed. Your current version was kept or restored. Details are in %LOCALAPPDATA%\VFERDZ Converter\app.log.",
+            $message,
             'VFERDZ Converter update',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error
         ) | Out-Null
     } catch {}
+    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
 }
 """
@@ -1693,6 +1763,18 @@ def main():
             )
         icon.run_detached()
         logger.info("VFERDZ Converter is running at %s", address)
+        ready_file = os.environ.get("VFERDZ_UPDATE_READY_FILE")
+        if ready_file:
+            try:
+                ready_path = Path(ready_file)
+                if (
+                    ready_path.parent.resolve() != app_data_folder().resolve()
+                    or not ready_path.name.startswith(".vferdz-ready-")
+                ):
+                    raise ValueError("The update readiness marker path is invalid.")
+                ready_path.write_text(address, encoding="ascii")
+            except (OSError, ValueError):
+                logger.exception("Could not write the app startup readiness marker.")
         if not webbrowser.open(address):
             logger.warning("Could not open the app in a browser: %s", address)
         server.serve_forever()
