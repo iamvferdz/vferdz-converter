@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="logo.ico" width="80" alt="VFERDZ — Anime Expeditions logo">
+</p>
+
+<h1 align="center">VFERDZ | VFERDZ Converter</h1>
+
 # YouTube to MP3
 
 A small local web app. The interface runs in your browser, while video and MP3 downloads and conversions happen on your computer.
@@ -16,13 +22,46 @@ A small local web app. The interface runs in your browser, while video and MP3 d
 
 The standalone executable bundles Python, the app dependencies, Deno, and FFmpeg. Python, Deno, and FFmpeg do not need to be installed separately; the app does not download or install runtimes on the computer. The backend runs without a command-prompt window. Each converter page shows its recent conversion activity. App diagnostic logs are saved to `%LOCALAPPDATA%\VFERDZ Converter\app.log`.
 
-To run from source instead, clone or download the project from GitHub, install Python 3.10 or newer, run `python -m pip install -r requirements.txt`, then run `python local_web_app.py`. This source mode also adds the tray icon and uses FFmpeg from `PATH` when available.
+## Development
 
-The app opens in your browser. From Home, choose **YouTube to MP3** to convert music or playlists, or **Video to MP4** to download a YouTube video or playlist in MP4 format. The project dependencies include yt-dlp's JavaScript challenge components required for YouTube extraction. After a single-video conversion, the MP4 downloads panel shows a download chip for each available MP4 resolution. For a playlist, the app prepares one best-available MP4 per video in batches and provides individual, batch ZIP, and full-playlist ZIP downloads. MP4 files are saved in your user `Downloads\YouTube to MP4` folder. The app does not re-encode local video files.
+To run from source, clone or download the project from GitHub and install Python 3.10 or newer. From the project folder, install the dependencies and start the development app:
+
+```bat
+python -m pip install -r requirements.txt
+run-dev.bat
+```
+
+`run-dev.bat` is for development only. It starts `local_web_app.py` from the project folder; the browser opens automatically, and the console stays available while the app runs. Press **Ctrl+C** to stop it. Source mode adds the tray icon and uses FFmpeg from `PATH` when available. Release builds are still produced automatically by the GitHub Actions workflow described below.
+
+## Features
+
+### Converters
+
+- **YouTube to MP3:** Convert a single YouTube music link or a playlist. Results show the track title, thumbnail when available, and MP3 file size; single-track downloads have an always-visible **Download MP3** button.
+- **Video to MP4:** Convert a single video and choose from the available MP4 resolutions, or convert a playlist using the best available MP4 format for each video. A single-video conversion provides a download chip for each available resolution. The app does not re-encode local video files.
+- Both converters have **Single** and **Playlist** modes. Single mode rejects playlist links, while Playlist mode requires one. Switching modes preserves current downloads without reloading the page.
+- Playlist items are processed in batches of 10. Each successful item becomes available as soon as it is ready while the next batch continues. Unavailable or failed items are skipped, and their errors are listed when processing finishes.
+- Stop an active conversion with the stop button. Refreshing or closing the page also requests that it stop. Progress and user-friendly errors are shown in the page, while detailed diagnostics remain available locally.
+
+### Playlist downloads
+
+- Download items individually, ZIP a single batch with **Download batch**, or ZIP all items ready so far with **All**.
+- Display playlist results as a compact numbered list or a grid of up to five columns. The selected layout is remembered in the browser. Playlist batches start expanded and can be collapsed; in Grid view, hover or focus a track to reveal its download button.
+- Playlist ZIPs use the playlist title in the filename, such as `vferdzconverter-My Playlist.zip` or `vferdzconverter-My Playlist-batch-1.zip`.
+- MP3 files are saved in your user `Downloads\YouTube to MP3` folder; MP4 files are saved in `Downloads\YouTube to MP4`. Download links are tied to the current app session, so keep the app running while downloading.
+- On desktop, the downloads list scrolls inside its panel so long playlists do not make the whole page scroll.
+
+### Interface and activity
+
+- The app opens its local web interface in your browser. Home links to the MP3 and MP4 converters; the Updates page and light/dark theme toggle are available from the header. Your theme choice is remembered in the browser.
+- Each converter shows recent backend activity: one entry by default, or up to 60 entries with **Show more**. Detailed diagnostic logs are saved to `%LOCALAPPDATA%\VFERDZ Converter\app.log`.
+- The app shows the installed version in the footer. Home also lists planned tools, such as PDF conversion. After a conversion finishes or fails, **Convert Again** lets you retry the current link.
+
+The project dependencies include yt-dlp's JavaScript challenge components required for YouTube extraction.
 
 ## Check for and install updates
 
-The app checks for a newer stable release when it opens and shows an update notice if one is available. Select **Download and install** to download the official release ZIP, verify its SHA-256 digest and contents, then replace the executable and restart the app automatically. The app does not update without your confirmation. You can also open **Updates** or select **Check for updates** to view release notes.
+The app checks for a newer stable release when it opens and shows an update notice if one is available. Select **Download and install** to download the official release ZIP, verify its SHA-256 digest and contents, then replace the executable and restart the app automatically. The app does not update without your confirmation. You can also open **Updates** or select **Check for updates** to view release notes. The Updates page lists only releases published on GitHub; long release notes are collapsed by default and can be expanded with **Show more**.
 
 To install an update:
 
@@ -32,16 +71,6 @@ To install an update:
 Automatic updates require the standalone app to be in a folder you can write to. If it is in a protected folder, move it to a user-owned location such as `%LOCALAPPDATA%` and try again. Update files are downloaded only from the project's official GitHub releases and checked against GitHub's published SHA-256 digest before installation. If automatic installation is unavailable, download and extract the ZIP manually, then replace the executable after choosing **Exit** from the tray icon.
 
 Converted MP3 files are stored separately in your user `Downloads\YouTube to MP3` folder. The update process does not need to replace or delete that downloads folder.
-
-Frontend files are organized into `Pages` for the Home, YouTube to MP3, Video to MP4, and Updates pages, and `Assets\CSS` / `Assets\JS` for shared styling and behavior. Home lists available and planned tools. Choose a converter to open its separate page. Home and Updates are available from the header; the footer shows the VFERDZ Converter logo/name and installed version, with links to available tools underneath.
-
-Choose **Single** or **Playlist** before pasting a link. Single mode rejects playlist links; Playlist mode requires a playlist link. Switching between these tabs preserves the current downloads and does not restart the page. During conversion, keep the page open and wait for processing to finish; use the stop button beside the convert button to cancel. Refreshing or closing the page also requests that any active conversion stop. Download errors are shown in user-friendly language while the local status API retains the underlying technical error. Playlist downloads can be displayed as a compact numbered list or a grid of up to five columns; the selected view is remembered in the browser. In Grid view, hover or focus a track to show its download button. Each playlist batch has a collapse toggle and starts expanded. Use the **All** button to ZIP all files ready so far, or **Download batch** to ZIP just that batch. ZIPs are named using the playlist title, for example `vferdzconverter-My Playlist.zip` and `vferdzconverter-My Playlist-batch-1.zip`. Download links are tied to the current app session; keep the app running and start the conversion again if you restart it. On desktop, the downloads list scrolls inside its panel so long playlists do not make the whole page scroll. Playlist mode automatically processes items in batches of 10. Each MP3 track or MP4 video becomes available for download as soon as it is converted, while the next batch continues in the background. MP4 playlists use the best available MP4 format for each video; single MP4 videos continue to offer each available resolution. If an item is private, restricted, unavailable, or otherwise fails to download or convert, the app skips it and continues; skipped items and their errors are listed when processing is complete. ZIPs include every successfully prepared item. MP3 files are saved in `Downloads\YouTube to MP3`; MP4 files are saved in `Downloads\YouTube to MP4`, both in your user folder.
-
-The Updates page lists only releases published on GitHub; it does not show local changelog entries as releases. Long release notes are collapsed by default and can be expanded with **Show more**.
-
-Each converter's input panel shows the latest backend activity on one line by default. Select **Show more** to view up to 60 recent activity entries, or **Show less** to return to the latest update. Detailed diagnostic information remains in the local app log.
-
-After conversion, the MP3 page shows the track title, thumbnail when available, and MP3 file size. Single-music downloads have an always-visible **Download MP3** button below the track details. The MP4 page displays the video title and thumbnail when available, with a download chip for each available resolution. The convert button changes to **Convert Again** after a conversion finishes or fails, so you can retry the current link without an extra button.
 
 The browser tab icon and header logo are loaded from `Assets\Images\logo.ico` and `Assets\Images\logo.png`.
 

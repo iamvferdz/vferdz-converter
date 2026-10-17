@@ -2,6 +2,15 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [0.3.2] - 10/18/2026
+
+### New
+- **Open Source Development**: just only added .bat file for developer to run the app directly. 
+
+### Improved
+- **Readme Instructions**: Clear Instructions
+- **Logo**: New Logo that fit for the app/project
+
 ## [0.3.1] - 10/17/2026
 
 ### Added
