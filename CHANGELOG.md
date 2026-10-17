@@ -2,6 +2,11 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [0.3.3] - 10/18/2026
+
+### Improved
+- **Manual Update Error**
+
 ## [0.3.2] - 10/18/2026
 
 ### New
