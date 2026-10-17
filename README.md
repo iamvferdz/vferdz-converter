@@ -5,14 +5,13 @@
 <h1 align="center">VFERDZ | VFERDZ Converter</h1>
 
 <p align="center">
-  VFERDZ Converter is a local Windows app built to bring <strong>many conversion tools together in one place</strong>, with tools for formats such as documents, images, audio, and video. Its current converters handle <strong>YouTube music to MP3 and YouTube videos to MP4</strong>. The app runs in your browser, with processing and downloads handled on your computer.
+  VFERDZ Converter is a local Windows app built to bring <strong>many conversion tools together in one place</strong>, with tools for formats such as documents, images, audio, and video. The app runs in your browser, with processing and downloads handled on your computer.
 </p>
 
 ## Table of contents
 
 - [Converter list](#converter-list)
   - [Current converters](#current-converters)
-  - [Planned converters](#planned-converters)
 - [Requirements](#requirements)
 - [Download and run](#download-and-run)
 - [Features](#features)
@@ -26,14 +25,6 @@
 
 - [x] YouTube to MP3
 - [x] YouTube to MP4
-
-### Planned converters
-
-These are ideas for future updates; availability and timing may change.
-
-- [ ] PDF conversion tools
-- [ ] Image to ICO converter
-- [ ] More document, image, audio, and video converters
 
 ## Requirements
 
