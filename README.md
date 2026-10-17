@@ -19,9 +19,7 @@
 - [Development](#development)
 - [Releases](#releases)
 
-## Converter list
-
-### Current converters
+## Converter list (Current)
 
 - [x] YouTube to MP3
 - [x] YouTube to MP4
