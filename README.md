@@ -32,8 +32,8 @@
 ## Download and run
 
 1. Download `vferdz-converter-v<version>.zip` from the latest stable [GitHub release](https://github.com/iamvferdz/vferdz-converter/releases).
-2. Extract the ZIP. It creates a `VFERDZ-CONVERTER` folder containing `VFERDZ Converter.exe` and all the required runtime files and folders, including `Assets` and `Pages`.
-3. Keep the executable, `Assets`, `Pages`, and all other extracted files together in the `VFERDZ-CONVERTER` folder. Do not move the executable by itself.
+2. Extract the ZIP. It creates a `VFERDZ-CONVERTER` folder with `VFERDZ Converter.exe`, `VERSION`, and one `_internal` folder containing the app resources and runtime files.
+3. Keep `VFERDZ Converter.exe`, `VERSION`, and `_internal` together in the `VFERDZ-CONVERTER` folder. Do not move or rename files inside `_internal`.
 4. Double-click `VFERDZ Converter.exe`. The app opens in your browser and stays available from its notification-area icon.
 5. Right-click the tray icon and choose **Exit** to stop the app.
 
@@ -72,7 +72,7 @@ The app checks for a newer stable release when it opens and shows an update noti
 To install an update:
 
 1. Select **Download and install** in the app's update notice or on the Updates page.
-2. The app closes, replaces the executable, and starts the updated version.
+2. The app closes, replaces the complete app folder, and starts the updated version.
 
 Automatic updates replace the complete `VFERDZ-CONVERTER` folder, so keep its name as-is and keep the folder and its parent writable. Use it only for the app; do not store personal files inside it, because successful updates replace the entire folder. If it is in a protected location, move the complete app folder to a user-owned location such as one under `%LOCALAPPDATA%` and try again. Update files are downloaded only from the project's official GitHub releases and checked against GitHub's published SHA-256 digest before installation. The updater stages and validates the whole bundle, checks that the updated app starts, and keeps the prior folder available for rollback until startup succeeds.
 
@@ -80,7 +80,7 @@ Users upgrading from a single-file release must install the first folder-based r
 
 Converted MP3 files are stored separately in your user `Downloads\YouTube to MP3` folder. The update process does not need to replace or delete that downloads folder.
 
-The browser tab icon, tray icon, and header logo are loaded from `Assets\Images\logo.ico` and `Assets\Images\logo.png` in the app folder.
+The browser tab icon, tray icon, and header logo are loaded from `_internal\Assets\Images\logo.ico` and `_internal\Assets\Images\logo.png` inside the app folder.
 
 Only download content you have permission to use.
 

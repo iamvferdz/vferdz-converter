@@ -2,6 +2,14 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [0.3.5] - 10/18/2026
+
+### Improved
+- **Move some files**
+
+### Fixed
+- **App Doesn't Show in System Tray**
+
 ## [0.3.4] - 10/18/2026
 
 ### Improved

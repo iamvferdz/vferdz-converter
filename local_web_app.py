@@ -51,7 +51,15 @@ def app_bundle_folder():
 
 
 def resource_path(relative_path):
-    return app_bundle_folder() / relative_path
+    bundle_folder = app_bundle_folder()
+    resource = Path(relative_path)
+    if getattr(sys, "frozen", False):
+        if resource == Path("VERSION"):
+            root_version = bundle_folder / resource
+            if root_version.is_file():
+                return root_version
+        return bundle_folder / "_internal" / resource
+    return bundle_folder / resource
 
 
 def ffmpeg_executable():
@@ -1013,7 +1021,7 @@ class UpdateManager:
         target_folder = app_bundle_folder()
         if (
             target_folder.name.casefold() != "vferdz-converter"
-            or not (target_folder / "Assets" / "Images" / "logo.ico").is_file()
+            or not (target_folder / "_internal" / "Assets" / "Images" / "logo.ico").is_file()
         ):
             return False, (
                 "Automatic updates require the complete app bundle in its "
@@ -1066,7 +1074,9 @@ class UpdateManager:
             powershell = shutil.which("powershell.exe")
             if not powershell:
                 raise RuntimeError("Windows PowerShell is not available to complete the update.")
-            if not (target_folder / "Assets" / "Images" / "logo.ico").is_file():
+            if not (
+                target_folder / "_internal" / "Assets" / "Images" / "logo.ico"
+            ).is_file():
                 raise RuntimeError(
                     "This app installation does not have the folder-based layout. "
                     "Download and extract the complete release ZIP into its own folder first."
@@ -1182,11 +1192,11 @@ class UpdateManager:
                 required_files = {
                     "VFERDZ Converter.exe",
                     "VERSION",
-                    "Assets/Images/logo.ico",
-                    "Assets/CSS/app.css",
-                    "Assets/JS/app.js",
-                    "Pages/index.html",
-                    "Scripts/deno.exe",
+                    "_internal/Assets/Images/logo.ico",
+                    "_internal/Assets/CSS/app.css",
+                    "_internal/Assets/JS/app.js",
+                    "_internal/Pages/index.html",
+                    "_internal/Scripts/deno.exe",
                 }
                 missing_files = required_files - files.keys()
                 if missing_files:
@@ -1874,6 +1884,7 @@ def main():
 
     server = None
     icon = None
+    tray_image = None
     try:
         server = ThreadingHTTPServer(("127.0.0.1", 0), LocalAppHandler)
         update_manager.shutdown_callback = server.shutdown
@@ -1898,19 +1909,31 @@ def main():
             )
             tray_image = Image.new("RGBA", (64, 64), "#252525")
             ImageDraw.Draw(tray_image).text((24, 18), "V", fill="white")
-        try:
-            icon = pystray.Icon(
-                "VFERDZ Converter",
-                tray_image,
-                "VFERDZ Converter",
-                menu=pystray.Menu(
-                    MenuItem("Open VFERDZ Converter", open_app, default=True),
-                    MenuItem("Exit", exit_app),
-                ),
-            )
-        finally:
-            tray_image.close()
-        icon.run_detached()
+        icon = pystray.Icon(
+            "VFERDZ Converter",
+            tray_image,
+            "VFERDZ Converter",
+            menu=pystray.Menu(
+                MenuItem("Open VFERDZ Converter", open_app, default=True),
+                MenuItem("Exit", exit_app),
+            ),
+        )
+        tray_ready = threading.Event()
+        tray_errors = []
+
+        def show_tray_icon(icon):
+            try:
+                icon.visible = True
+            except Exception as error:
+                tray_errors.append(error)
+            finally:
+                tray_ready.set()
+
+        icon.run_detached(setup=show_tray_icon)
+        if not tray_ready.wait(timeout=10):
+            raise RuntimeError("The system tray icon did not finish initializing.")
+        if tray_errors:
+            raise RuntimeError(f"Could not display the system tray icon: {tray_errors[0]}")
         logger.info("VFERDZ Converter is running at %s", address)
         ready_file = os.environ.get("VFERDZ_UPDATE_READY_FILE")
         if ready_file:
@@ -1933,6 +1956,8 @@ def main():
     finally:
         if icon:
             icon.stop()
+        if tray_image:
+            tray_image.close()
         if server:
             server.server_close()
 

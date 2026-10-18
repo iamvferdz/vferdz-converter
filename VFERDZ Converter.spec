@@ -62,7 +62,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     icon=str(project_root / "Assets" / "Images" / "logo.ico"),
-    contents_directory=".",
+    contents_directory="_internal",
 )
 coll = COLLECT(
     exe,

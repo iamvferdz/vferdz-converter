@@ -51,6 +51,10 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller
       - name: Build standalone Windows app
         run: python -m PyInstaller --noconfirm --clean "VFERDZ Converter.spec"
+      - name: Put version file beside executable
+        run: |
+          Copy-Item "dist\VFERDZ-CONVERTER\_internal\VERSION" "dist\VFERDZ-CONVERTER\VERSION"
+          Remove-Item "dist\VFERDZ-CONVERTER\_internal\VERSION"
       - name: Package app folder in ZIP
         run: |
           python -c @'
@@ -77,11 +81,11 @@ jobs:
               required = {
                   'VFERDZ-CONVERTER/VFERDZ Converter.exe',
                   'VFERDZ-CONVERTER/VERSION',
-                  'VFERDZ-CONVERTER/Pages/index.html',
-                  'VFERDZ-CONVERTER/Assets/Images/logo.ico',
-                  'VFERDZ-CONVERTER/Assets/CSS/app.css',
-                  'VFERDZ-CONVERTER/Assets/JS/app.js',
-                  'VFERDZ-CONVERTER/Scripts/deno.exe',
+                  'VFERDZ-CONVERTER/_internal/Pages/index.html',
+                  'VFERDZ-CONVERTER/_internal/Assets/Images/logo.ico',
+                  'VFERDZ-CONVERTER/_internal/Assets/CSS/app.css',
+                  'VFERDZ-CONVERTER/_internal/Assets/JS/app.js',
+                  'VFERDZ-CONVERTER/_internal/Scripts/deno.exe',
               }
               missing = required - names
               assert not missing, f'Missing bundle files: {sorted(missing)}'
