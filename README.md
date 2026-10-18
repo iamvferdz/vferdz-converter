@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="https://github.com/iamvferdz/vferdz-converter/releases"><img src="https://img.shields.io/github/v/release/iamvferdz/vferdz-converter?label=version" alt="Latest release"></a>
-  <a href="https://github.com/iamvferdz/vferdz-converter/releases"><img src="https://img.shields.io/github/downloads/iamvferdz/vferdz-converter/total?label=downloads" alt="GitHub release downloads"></a>
-  <a href="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml"><img src="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/iamvferdz/vferdz-converter/releases/latest"><img src="https://img.shields.io/github/downloads/iamvferdz/vferdz-converter/latest/total?label=latest%20release%20downloads" alt="Latest release downloads"></a>
+  <a href="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml"><img src="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status on main"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?logo=windows&logoColor=white" alt="Platform: Windows 10 and newer"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/iamvferdz/vferdz-converter" alt="MIT license"></a>
 </p>
