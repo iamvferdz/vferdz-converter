@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Check Python syntax
+        run: python -m py_compile local_web_app.py
+      - name: Build standalone Windows app
+        run: python -m PyInstaller --noconfirm --clean "VFERDZ Converter.spec"
+      - name: Verify app bundle layout
+        run: |
+          python -c @'
+          from pathlib import Path
+
+          bundle = Path('dist') / 'VFERDZ-CONVERTER'
+          required = (
+              'VFERDZ Converter.exe',
+              '_internal/VERSION',
+              '_internal/Pages/index.html',
+              '_internal/Assets/Images/logo.ico',
+              '_internal/Scripts/deno.exe',
+          )
+          missing = [name for name in required if not (bundle / name).is_file()]
+          assert not missing, f'Missing bundle files: {missing}'
+          '@

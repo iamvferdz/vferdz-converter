@@ -8,6 +8,14 @@
   VFERDZ Converter is a local Windows app built to bring <strong>many conversion tools together in one place</strong>, with tools for formats such as documents, images, audio, and video. The app runs in your browser, with processing and downloads handled on your computer.
 </p>
 
+<p align="center">
+  <a href="https://github.com/iamvferdz/vferdz-converter/releases"><img src="https://img.shields.io/github/v/release/iamvferdz/vferdz-converter?label=version" alt="Latest release"></a>
+  <a href="https://github.com/iamvferdz/vferdz-converter/releases"><img src="https://img.shields.io/github/downloads/iamvferdz/vferdz-converter/total?label=downloads" alt="GitHub release downloads"></a>
+  <a href="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml"><img src="https://github.com/iamvferdz/vferdz-converter/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?logo=windows&logoColor=white" alt="Platform: Windows 10 and newer"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/iamvferdz/vferdz-converter" alt="MIT license"></a>
+</p>
+
 ## Table of contents
 
 - [Converter list](#converter-list)
@@ -18,6 +26,7 @@
 - [Check for and install updates](#check-for-and-install-updates)
 - [Development](#development)
 - [Releases](#releases)
+- [License](#license)
 
 ## Converter list (Current)
 
@@ -101,3 +110,8 @@ Version tags beginning with `v` (for example, `v1.0.0`) trigger a GitHub
 Actions workflow that builds the Windows app bundle, places the executable
 and all required runtime files and folders in a versioned ZIP, and attaches
 the ZIP to the matching GitHub release.
+
+## License
+
+VFERDZ Converter is licensed under the [MIT License](./LICENSE). Third-party
+dependencies bundled with the app remain subject to their respective licenses.
