@@ -2,6 +2,12 @@
 
 All notable changes to VFERDZ CONVERTER are documented here.
 
+## [0.3.4] - 10/18/2026
+
+### Improved
+- **Update Release Files/ZIP**: Now it has folders together with the .exe file
+- **Readme Update**
+
 ## [0.3.3] - 10/18/2026
 
 ### Improved

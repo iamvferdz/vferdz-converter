@@ -1,4 +1,4 @@
-name: Release Windows EXE ZIP
+name: Release Windows app ZIP
 
 on:
   push:
@@ -51,10 +51,43 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller
       - name: Build standalone Windows app
         run: python -m PyInstaller --noconfirm --clean "VFERDZ Converter.spec"
-      - name: Package executable in ZIP
-        run: Compress-Archive -Path "dist\VFERDZ Converter.exe" -DestinationPath "vferdz-converter-${{ github.ref_name }}.zip" -CompressionLevel Optimal
-      - name: Verify ZIP contains only the executable
-        run: python -c "import zipfile; names = zipfile.ZipFile('vferdz-converter-${{ github.ref_name }}.zip').namelist(); assert names == ['VFERDZ Converter.exe'], names"
+      - name: Package app folder in ZIP
+        run: |
+          python -c @'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          bundle = Path('dist') / 'VFERDZ-CONVERTER'
+          archive_path = Path('vferdz-converter-${{ github.ref_name }}.zip')
+          with ZipFile(archive_path, 'w', ZIP_DEFLATED) as archive:
+              for path in sorted(bundle.rglob("*")):
+                  if path.is_file():
+                      archive.write(
+                          path,
+                          (Path(bundle.name) / path.relative_to(bundle)).as_posix(),
+                      )
+          '@
+      - name: Verify ZIP contains the complete app bundle
+        run: |
+          python -c @'
+          from zipfile import ZipFile
+
+          with ZipFile('vferdz-converter-${{ github.ref_name }}.zip') as archive:
+              names = set(archive.namelist())
+              required = {
+                  'VFERDZ-CONVERTER/VFERDZ Converter.exe',
+                  'VFERDZ-CONVERTER/VERSION',
+                  'VFERDZ-CONVERTER/Pages/index.html',
+                  'VFERDZ-CONVERTER/Assets/Images/logo.ico',
+                  'VFERDZ-CONVERTER/Assets/CSS/app.css',
+                  'VFERDZ-CONVERTER/Assets/JS/app.js',
+                  'VFERDZ-CONVERTER/Scripts/deno.exe',
+              }
+              missing = required - names
+              assert not missing, f'Missing bundle files: {sorted(missing)}'
+              assert all(name.startswith('VFERDZ-CONVERTER/') for name in names)
+              assert all(not name.startswith('/') and '..' not in name.split('/') for name in names)
+          '@
       - name: Publish app ZIP on GitHub release
         uses: softprops/action-gh-release@v2
         with:

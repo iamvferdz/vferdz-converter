@@ -2,6 +2,7 @@ from importlib.metadata import distribution
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, copy_metadata
+from PyInstaller.building.api import COLLECT
 
 
 project_root = Path(SPECPATH)
@@ -51,9 +52,8 @@ pyz = PYZ(analysis.pure)
 exe = EXE(
     pyz,
     analysis.scripts,
-    analysis.binaries,
-    analysis.datas,
     [],
+    exclude_binaries=True,
     name="VFERDZ Converter",
     debug=False,
     bootloader_ignore_signals=False,
@@ -62,4 +62,14 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     icon=str(project_root / "Assets" / "Images" / "logo.ico"),
+    contents_directory=".",
+)
+coll = COLLECT(
+    exe,
+    analysis.binaries,
+    analysis.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="VFERDZ-CONVERTER",
 )

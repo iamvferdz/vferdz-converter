@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,12 +19,12 @@ import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.metadata import PackageNotFoundError, distribution
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, quote, urlsplit
 
 import imageio_ffmpeg
 import pystray
-from PIL import Image
+from PIL import Image, ImageDraw
 from pystray import MenuItem
 from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
@@ -35,13 +36,22 @@ VIDEO_DOWNLOAD_FOLDER = Path.home() / "Downloads" / "YouTube to MP4"
 ALLOWED_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 PLAYLIST_BATCH_SIZE = 10
 UPDATE_REPOSITORY = "iamvferdz/vferdz-converter"
-MAX_UPDATE_ARCHIVE_SIZE = 250 * 1024 * 1024
+MAX_UPDATE_ARCHIVE_SIZE = 1024 * 1024 * 1024
+MAX_UPDATE_BUNDLE_SIZE = 2 * 1024 * 1024 * 1024
+MAX_UPDATE_FILE_COUNT = 20000
 logger = logging.getLogger("vferdz_converter")
 
 
+def app_bundle_folder():
+    return (
+        Path(sys.executable).resolve().parent
+        if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent
+    )
+
+
 def resource_path(relative_path):
-    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return root / relative_path
+    return app_bundle_folder() / relative_path
 
 
 def ffmpeg_executable():
@@ -1000,6 +1010,15 @@ class UpdateManager:
             return False, "Automatic updates are available in the standalone Windows app."
         if Path(sys.executable).name.lower() != "vferdz converter.exe":
             return False, "The app executable could not be identified for updating."
+        target_folder = app_bundle_folder()
+        if (
+            target_folder.name.casefold() != "vferdz-converter"
+            or not (target_folder / "Assets" / "Images" / "logo.ico").is_file()
+        ):
+            return False, (
+                "Automatic updates require the complete app bundle in its "
+                "'VFERDZ-CONVERTER' folder. Extract the release ZIP to install it there."
+            )
         try:
             if not is_newer_version(tag, resource_path("VERSION").read_text(encoding="utf-8").strip()):
                 return False, "This update is not newer than the installed version."
@@ -1039,23 +1058,31 @@ class UpdateManager:
 
     def _install(self, tag, digest):
         archive_path = None
-        staged_path = None
+        staged_folder = None
         script_path = None
         target_path = Path(sys.executable).resolve()
+        target_folder = app_bundle_folder()
         try:
             powershell = shutil.which("powershell.exe")
             if not powershell:
                 raise RuntimeError("Windows PowerShell is not available to complete the update.")
-            target_folder = target_path.parent
+            if not (target_folder / "Assets" / "Images" / "logo.ico").is_file():
+                raise RuntimeError(
+                    "This app installation does not have the folder-based layout. "
+                    "Download and extract the complete release ZIP into its own folder first."
+                )
             try:
                 with tempfile.NamedTemporaryFile(
-                    prefix=".vferdz-write-check-", dir=target_folder, delete=True
+                    prefix=".vferdz-write-check-",
+                    dir=target_folder.parent,
+                    delete=True,
                 ):
                     pass
             except OSError as error:
                 raise PermissionError(
-                    "The app folder is not writable. Move VFERDZ Converter.exe to a folder "
-                    "you own, such as a folder under %LOCALAPPDATA%, then retry."
+                    "The app's parent folder is not writable. Move the complete VFERDZ "
+                    "Converter folder to a folder you own, such as one under %LOCALAPPDATA%, "
+                    "then retry."
                 ) from error
 
             url = (
@@ -1113,52 +1140,154 @@ class UpdateManager:
 
             self._set_state("verifying", "Verifying the update package...", 100)
             with zipfile.ZipFile(archive_path) as archive:
-                if archive.namelist() != ["VFERDZ Converter.exe"]:
-                    raise RuntimeError("The update ZIP must contain only VFERDZ Converter.exe.")
-                if archive.getinfo("VFERDZ Converter.exe").file_size > MAX_UPDATE_ARCHIVE_SIZE:
+                files = {}
+                seen_paths = set()
+                total_size = 0
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    if (
+                        not info.filename
+                        or "\\" in info.filename
+                        or ":" in info.filename
+                        or info.filename.startswith("/")
+                    ):
+                        raise RuntimeError("The update package contains an invalid file path.")
+                    relative_path = PurePosixPath(info.filename)
+                    if (
+                        any(part in {"", ".", ".."} for part in relative_path.parts)
+                        or relative_path.is_absolute()
+                        or stat.S_ISLNK(info.external_attr >> 16)
+                    ):
+                        raise RuntimeError("The update package contains an unsafe file path.")
+                    archive_root = "VFERDZ-CONVERTER/"
+                    if not info.filename.startswith(archive_root):
+                        raise RuntimeError(
+                            "The update package must contain the app in a "
+                            "'VFERDZ-CONVERTER' folder."
+                        )
+                    normalized_name = info.filename[len(archive_root):]
+                    if not normalized_name:
+                        raise RuntimeError("The update package contains an invalid file path.")
+                    if normalized_name.casefold() in seen_paths:
+                        raise RuntimeError("The update package contains duplicate file paths.")
+                    seen_paths.add(normalized_name.casefold())
+                    files[normalized_name] = info
+                    total_size += info.file_size
+                    if total_size > MAX_UPDATE_BUNDLE_SIZE:
+                        raise RuntimeError("The extracted app bundle is larger than the allowed size.")
+                    if len(files) > MAX_UPDATE_FILE_COUNT:
+                        raise RuntimeError("The update package contains too many files.")
+
+                required_files = {
+                    "VFERDZ Converter.exe",
+                    "VERSION",
+                    "Assets/Images/logo.ico",
+                    "Assets/CSS/app.css",
+                    "Assets/JS/app.js",
+                    "Pages/index.html",
+                    "Scripts/deno.exe",
+                }
+                missing_files = required_files - files.keys()
+                if missing_files:
+                    raise RuntimeError(
+                        "The update package is missing required app files: "
+                        + ", ".join(sorted(missing_files))
+                    )
+                archive_version = archive.read(files["VERSION"]).decode("utf-8").strip()
+                if archive_version != tag.removeprefix("v"):
+                    raise RuntimeError("The update package version does not match the release tag.")
+                if files["VFERDZ Converter.exe"].file_size > MAX_UPDATE_ARCHIVE_SIZE:
                     raise RuntimeError("The app executable is larger than the allowed size.")
                 if archive.testzip() is not None:
                     raise RuntimeError("The update ZIP is damaged.")
-                with archive.open("VFERDZ Converter.exe") as source:
-                    with tempfile.NamedTemporaryFile(
-                        prefix=".vferdz-update-",
-                        suffix=".exe",
-                        dir=target_folder,
-                        delete=False,
-                    ) as staged_file:
-                        staged_path = Path(staged_file.name)
-                        header = source.read(2)
-                        if header != b"MZ":
-                            raise RuntimeError("The downloaded app is not a valid Windows executable.")
-                        staged_file.write(header)
-                        shutil.copyfileobj(source, staged_file)
-                        staged_file.flush()
-                        os.fsync(staged_file.fileno())
+                staged_folder = Path(
+                    tempfile.mkdtemp(
+                        prefix=".vferdz-update-stage-",
+                        dir=target_folder.parent,
+                    )
+                )
+                for relative_name, info in files.items():
+                    destination = staged_folder.joinpath(
+                        *PurePosixPath(relative_name).parts
+                    )
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info) as source, destination.open("xb") as output:
+                        if relative_name == "VFERDZ Converter.exe":
+                            header = source.read(2)
+                            if header != b"MZ":
+                                raise RuntimeError(
+                                    "The downloaded app is not a valid Windows executable."
+                                )
+                            output.write(header)
+                        shutil.copyfileobj(source, output)
+                        output.flush()
+                        os.fsync(output.fileno())
 
             self._set_state("verifying", "Preparing to replace the app...", 100)
             script = r"""
 $ErrorActionPreference = 'Stop'
-$target = $env:VFERDZ_UPDATE_TARGET
-$staged = $env:VFERDZ_UPDATE_STAGED
-$backup = "$target.previous-$([guid]::NewGuid().ToString('N'))"
+$targetFolder = $env:VFERDZ_UPDATE_TARGET_FOLDER
+$target = Join-Path $targetFolder 'VFERDZ Converter.exe'
+$stagedFolder = $env:VFERDZ_UPDATE_STAGED_FOLDER
+$backupFolder = "$targetFolder.previous-$([guid]::NewGuid().ToString('N'))"
 $log = $env:VFERDZ_UPDATE_LOG
 $readyFile = Join-Path (Split-Path $log) ".vferdz-ready-$([guid]::NewGuid().ToString('N'))"
 $scriptPath = $MyInvocation.MyCommand.Path
 $app = $null
 $replaced = $false
+function Stop-UpdatedAppProcesses {
+    try {
+        $processes = Get-CimInstance -ClassName Win32_Process `
+            -Filter "Name = 'VFERDZ Converter.exe'" `
+            -ErrorAction Stop
+    } catch {
+        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) WARNING Could not inspect app processes before recovery: $($_.Exception.Message)"
+        if ($app -and (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+        }
+        return
+    }
+    $processIds = @(
+        $processes |
+            Where-Object { $_.ExecutablePath -eq $target } |
+            ForEach-Object { [int]$_.ProcessId }
+    )
+    if ($app -and $app.Id -notin $processIds) {
+        $processIds += $app.Id
+    }
+    foreach ($processId in $processIds) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+        } catch {
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) WARNING Could not stop app process $processId during recovery: $($_.Exception.Message)"
+        }
+    }
+    if ($processIds.Count) {
+        Wait-Process -Id $processIds -Timeout 5 -ErrorAction SilentlyContinue
+    }
+}
 try {
+    Set-Location -LiteralPath $env:TEMP
     Wait-Process -Id ([int]$env:VFERDZ_UPDATE_PARENT) -ErrorAction SilentlyContinue
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
         try {
-            [System.IO.File]::Replace($staged, $target, $backup, $true)
+            [System.IO.Directory]::Move($targetFolder, $backupFolder)
+            [System.IO.Directory]::Move($stagedFolder, $targetFolder)
             $replaced = $true
             break
         } catch {
+            if (
+                -not (Test-Path -LiteralPath $targetFolder) -and
+                (Test-Path -LiteralPath $backupFolder)
+            ) {
+                [System.IO.Directory]::Move($backupFolder, $targetFolder)
+            }
             Start-Sleep -Milliseconds 500
         }
     }
     if (-not $replaced) {
-        throw 'The app file remained in use or could not be replaced.'
+        throw 'The app folder remained in use or could not be replaced.'
     }
 
     $started = $false
@@ -1166,7 +1295,7 @@ try {
         Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
         $env:VFERDZ_UPDATE_READY_FILE = $readyFile
         Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Starting updated app (attempt $attempt of 2)."
-        $app = Start-Process -FilePath $target -WorkingDirectory (Split-Path $target) -PassThru
+        $app = Start-Process -FilePath $target -WorkingDirectory $targetFolder -PassThru
         $startupFailure = 'The app did not write its startup readiness marker.'
         $deadline = (Get-Date).AddSeconds(30)
         while ((Get-Date) -lt $deadline) {
@@ -1191,10 +1320,7 @@ try {
 
         if (-not $started) {
             Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Updated app startup attempt $attempt failed its health check: $startupFailure"
-            if (Get-Process -Id $app.Id -ErrorAction SilentlyContinue) {
-                Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-                Wait-Process -Id $app.Id -Timeout 5 -ErrorAction SilentlyContinue
-            }
+            Stop-UpdatedAppProcesses
             if ($attempt -lt 2) {
                 Start-Sleep -Seconds 2
             }
@@ -1207,27 +1333,29 @@ try {
 
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Update to $($env:VFERDZ_UPDATE_TAG) installed."
     try {
-        Remove-Item -LiteralPath $backup -Force
+        Remove-Item -LiteralPath $backupFolder -Recurse -Force
     } catch {
-        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) WARNING Updated app started, but the previous executable backup could not be removed: $($_.Exception.Message)"
+        Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) WARNING Updated app started, but the previous app bundle backup could not be removed: $($_.Exception.Message)"
     }
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
     exit 0
 } catch {
-    if ($app -and (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)) {
-        Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-        Wait-Process -Id $app.Id -Timeout 5 -ErrorAction SilentlyContinue
+    if ($app) {
+        Stop-UpdatedAppProcesses
     }
     $restored = $false
-    if (Test-Path -LiteralPath $backup) {
+    if (Test-Path -LiteralPath $backupFolder) {
         try {
-            $failedTarget = "$target.failed-$([guid]::NewGuid().ToString('N'))"
-            [System.IO.File]::Replace($backup, $target, $failedTarget, $true)
+            $failedFolder = "$targetFolder.failed-$([guid]::NewGuid().ToString('N'))"
+            if (Test-Path -LiteralPath $targetFolder) {
+                [System.IO.Directory]::Move($targetFolder, $failedFolder)
+            }
+            [System.IO.Directory]::Move($backupFolder, $targetFolder)
             $restored = $true
-            Remove-Item -LiteralPath $failedTarget -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $failedFolder -Recurse -Force -ErrorAction SilentlyContinue
         } catch {
-            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Could not restore the previous app executable: $($_.Exception.Message)"
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Could not restore the previous app bundle: $($_.Exception.Message)"
         }
     } elseif (-not $replaced) {
         $restored = $true
@@ -1235,18 +1363,18 @@ try {
     if ($restored) {
         Remove-Item Env:VFERDZ_UPDATE_READY_FILE -ErrorAction SilentlyContinue
         try {
-            Start-Process -FilePath $target -WorkingDirectory (Split-Path $target)
-            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Previous app version was restored and its launch was requested."
+            Start-Process -FilePath $target -WorkingDirectory $targetFolder
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) INFO Previous app bundle was restored and its launch was requested."
         } catch {
-            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Previous app version was restored, but could not be launched: $($_.Exception.Message)"
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Previous app bundle was restored, but could not be launched: $($_.Exception.Message)"
         }
     }
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) ERROR Update failed: $($_.Exception.Message)"
     try {
         $message = if ($restored) {
-            "The updated app could not start. The previous version was restored. Details are in $log."
+            "The updated app could not start. The previous app bundle was restored. Details are in $log."
         } else {
-            "The updated app could not start, and the previous version could not be confirmed as restored. Check $log."
+            "The updated app could not start, and the previous app bundle could not be confirmed as restored. Check $log."
         }
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show(
@@ -1258,6 +1386,9 @@ try {
     } catch {}
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $stagedFolder) {
+        Remove-Item -LiteralPath $stagedFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 """
             log_folder = app_data_folder()
@@ -1291,14 +1422,14 @@ try {
                 creationflags=creation_flags,
                 env={
                     **os.environ,
-                    "VFERDZ_UPDATE_TARGET": str(target_path),
-                    "VFERDZ_UPDATE_STAGED": str(staged_path),
+                    "VFERDZ_UPDATE_TARGET_FOLDER": str(target_folder),
+                    "VFERDZ_UPDATE_STAGED_FOLDER": str(staged_folder),
                     "VFERDZ_UPDATE_PARENT": str(os.getpid()),
                     "VFERDZ_UPDATE_LOG": str(log_folder / "app.log"),
                     "VFERDZ_UPDATE_TAG": tag,
                 },
             )
-            staged_path = None
+            staged_folder = None
             script_path = None
             self._set_state(
                 "restarting",
@@ -1315,12 +1446,17 @@ try {
                 error=str(error),
             )
         finally:
-            for path in (archive_path, staged_path, script_path):
+            for path in (archive_path, script_path):
                 if path:
                     try:
                         path.unlink(missing_ok=True)
                     except OSError:
                         logger.exception("Could not remove temporary update file %s.", path)
+            if staged_folder:
+                try:
+                    shutil.rmtree(staged_folder)
+                except OSError:
+                    logger.exception("Could not remove temporary app bundle %s.", staged_folder)
 
     def _shutdown_app(self):
         time.sleep(1)
@@ -1376,6 +1512,8 @@ class LocalAppHandler(BaseHTTPRequestHandler):
                         sys.platform == "win32"
                         and getattr(sys, "frozen", False)
                         and Path(sys.executable).name.lower() == "vferdz converter.exe"
+                        and app_bundle_folder().name.casefold() == "vferdz-converter"
+                        and resource_path(Path("Assets") / "Images" / "logo.ico").is_file()
                     ),
                     **update_manager.snapshot(),
                 },
@@ -1749,18 +1887,29 @@ def main():
             server.shutdown()
             icon.stop()
 
-        with Image.open(
-            resource_path(Path("Assets") / "Images" / "logo.ico")
-        ) as tray_image:
+        tray_image_path = resource_path(Path("Assets") / "Images" / "logo.ico")
+        try:
+            with Image.open(tray_image_path) as image:
+                tray_image = image.copy()
+        except OSError:
+            logger.exception(
+                "Could not load the bundled tray icon from %s; using a fallback icon.",
+                tray_image_path,
+            )
+            tray_image = Image.new("RGBA", (64, 64), "#252525")
+            ImageDraw.Draw(tray_image).text((24, 18), "V", fill="white")
+        try:
             icon = pystray.Icon(
                 "VFERDZ Converter",
-                tray_image.copy(),
+                tray_image,
                 "VFERDZ Converter",
                 menu=pystray.Menu(
                     MenuItem("Open VFERDZ Converter", open_app, default=True),
                     MenuItem("Exit", exit_app),
                 ),
             )
+        finally:
+            tray_image.close()
         icon.run_detached()
         logger.info("VFERDZ Converter is running at %s", address)
         ready_file = os.environ.get("VFERDZ_UPDATE_READY_FILE")
